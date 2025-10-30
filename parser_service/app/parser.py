@@ -5,7 +5,7 @@ from typing import List, Iterable
 from lark import Lark, Transformer, v_args, Token
 
 from .ast_models import (
-    Program, Block, Assign, Call, If, For, While, Repeat,
+    Program, Block, Assign, Call, If, For, While, Repeat, Proc,   # ⬅️ importa Proc
     Num, Bool, NullLit, Var, Range, Index, Field,
     UnOp, BinOp, FuncCall, Expr, LValue
 )
@@ -77,15 +77,15 @@ def _fold_bin(first, rest_pairs):
 @v_args(inline=True)
 class BuildAST(Transformer):
     # ========= programa / listas / bloque =========
-    def program(self, *stmts):
+    def program(self, *items):
         body = []
-        for s in stmts:
-            if s is None:
+        for it in items:
+            if it is None:
                 continue
-            if isinstance(s, list):
-                body.extend(s)
+            if isinstance(it, list):
+                body.extend(it)
             else:
-                body.append(s)
+                body.append(it)
         return Program(body=body)
 
     # IMPORTANTE: mantenemos stmt_list por si aparece explícito (como en repeat_loop)
@@ -128,6 +128,25 @@ class BuildAST(Transformer):
                 out.append(it)
         return out
 
+    # ——— parámetros y procedimientos ———
+    def param_list(self, *names):
+        # devuelve ['n', 'm', ...]
+        return [str(t) for t in names]
+
+    def proc_def(self, name_tok, *items):
+        # NAME "(" param_list? ")" BEGIN stmt_list END
+        params: list[str] = []
+        body: list = []
+        for it in items:
+            if it is None:
+                continue
+            if isinstance(it, list):
+                # Puede ser params (list[str]) o body (list[Stmt])
+                if it and isinstance(it[0], str):
+                    params = it
+                else:
+                    body = it
+        return Proc(name=str(name_tok), params=params, body=body)
     # ============== literales / átomos ==============
     def NUMBER(self, tok: Token):
         return Num(value=int(tok.value))

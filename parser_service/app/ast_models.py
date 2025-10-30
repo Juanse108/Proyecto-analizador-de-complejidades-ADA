@@ -83,8 +83,8 @@ Expr = Union[
 # ===========
 class Assign(BaseModel):
     kind: Literal["assign"] = "assign"
-    target: LValue
-    expr: Expr
+    target: "LValue"
+    expr: "Expr"
 
 
 class Call(BaseModel):
@@ -101,7 +101,7 @@ class Block(BaseModel):
 
 class If(BaseModel):
     kind: Literal["if"] = "if"
-    cond: Expr
+    cond: "Expr"
     then_body: List["Stmt"]
     else_body: Optional[List["Stmt"]] = None
 
@@ -109,26 +109,34 @@ class If(BaseModel):
 class For(BaseModel):
     kind: Literal["for"] = "for"
     var: str
-    start: Expr
-    end: Expr
-    step: Optional[Expr] = None
-    inclusive: bool = True  # "to" inclusivo, por si luego agregas variantes
+    start: "Expr"
+    end: "Expr"
+    step: Optional["Expr"] = None
+    inclusive: bool = True
     body: List["Stmt"]
 
 
 class While(BaseModel):
     kind: Literal["while"] = "while"
-    cond: Expr
+    cond: "Expr"
     body: List["Stmt"]
 
 
 class Repeat(BaseModel):
     kind: Literal["repeat"] = "repeat"
     body: List["Stmt"]
-    until: Expr
+    until: "Expr"
+
+# —— NUEVO: Procedimiento (solo top-level) ——
+class Proc(BaseModel):
+    kind: Literal["proc"] = "proc"
+    name: str
+    params: List[str] = []
+    body: List["Stmt"]
 
 
-Stmt = Union[Assign, Call, Block, If, For, While, Repeat]
+# Sentencias (no incluimos Proc aquí para impedir defs dentro de for/while/if)
+Stmt = Union[Assign, For, While, If, Repeat, "Call", "Block"]
 
 
 # ===========
@@ -136,9 +144,12 @@ Stmt = Union[Assign, Call, Block, If, For, While, Repeat]
 # ===========
 class Program(BaseModel):
     kind: Literal["program"] = "program"
-    body: List[Stmt]
+    # Top-level acepta tanto procedimientos como sentencias
+    body: List[Union[Stmt, Proc]]
 
 
 # Reconstruye referencias hacia delante (Pydantic v2)
 for _M in (Range, Index, Field, UnOp, BinOp, FuncCall, Assign, Call, Block, If, For, While, Repeat, Program):
     _M.model_rebuild()
+
+Program.model_rebuild()

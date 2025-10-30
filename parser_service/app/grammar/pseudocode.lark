@@ -1,7 +1,5 @@
 ?start: program
-program: stmt_list
-
-?stmt_list: (stmt)*
+program: (proc_def | stmt)*
 
 ?stmt: assign
      | for_loop
@@ -9,38 +7,47 @@ program: stmt_list
      | repeat_loop
      | if_stmt
      | call_stmt
-     // ⬅️ OJO: ya NO permitimos `| block` aquí
+     // ⬅️ OJO: no permitimos block ni proc_def como stmt
 
+// ===== Bloques y listas =====
 block: BEGIN stmt_list END
-block_or_list: block | stmt_list   // ⬅️ única definición (no dupliques esta regla)
+stmt_list: (stmt)*                // ⬅️ (re)definida explícitamente
+block_or_list: block | stmt_list
 
+// ===== Procedimientos (solo top-level) =====
+proc_def: NAME "(" param_list? ")" BEGIN stmt_list END
+param_list: NAME ("," NAME)*
+
+// ===== Asignaciones y lvalues =====
 assign: lvalue ASSIGN expr
 lvalue: NAME ("[" subscript_list "]")* ("." NAME ("[" subscript_list "]")* )*
+slice: expr (".." expr)?
+subscript_list: slice ("," slice)*
 
-slice: expr (".." expr)?   // A[i] o A[1..j]
-subscript_list: slice ("," slice)*   // M[i,j] o T[i, j, k]
-
-
+// ===== Bucles y condicionales =====
 for_loop: FOR NAME ASSIGN expr TO expr (STEP expr)? DO block_or_list END_FOR
 while_loop: WHILE "(" bool_expr ")" DO block_or_list END_WHILE
 repeat_loop: REPEAT block_or_list UNTIL "(" bool_expr ")"
 
 if_stmt: IF "(" bool_expr ")" THEN block_or_list (ELSE block_or_list)? END_IF
 
+// ===== Llamadas =====
 call_stmt: CALL NAME "(" arg_list? ")"
 arg_list: expr ("," expr)*
 
+// ===== Booleanas =====
 ?bool_expr: or_expr
 ?or_expr: and_expr (OR and_expr)*
 ?and_expr: not_expr (AND not_expr)*
 ?not_expr: NOT not_expr
          | rel_expr
-         | "(" bool_expr ")"      // ⬅️ permite ((...)) en condiciones booleanas
+         | "(" bool_expr ")"
 
+// ===== Relacionales =====
 ?rel_expr: expr (rel_op expr)?
-
 rel_op: EQ | NE | NE2 | LT | LE | GT | GE | LE_U | GE_U | NE_U
 
+// ===== Aritmética =====
 ?expr: sum
 ?sum: prod ((PLUS|MINUS) prod)*
 ?prod: unary ((MUL|REAL_DIV|DIV_INT|MOD) unary)*
@@ -52,44 +59,37 @@ rel_op: EQ | NE | NE2 | LT | LE | GT | GE | LE_U | GE_U | NE_U
      | F          -> false
      | NULL
      | lvalue
-     | NAME "(" arg_list? ")"   -> func_call   // p.ej., length(A), ceil(x), floor(x)
+     | NAME "(" arg_list? ")"   -> func_call
      | CEIL_OPEN expr CEIL_CLOSE  -> ceil_brackets
      | FLOOR_OPEN expr FLOOR_CLOSE -> floor_brackets
      | "(" expr ")"
 
-// ===== Palabras clave / cierres (prioridad alta) =====
+// ===== Palabras clave =====
 ASSIGN.50: "<-" | "🡨"
-
 FOR.50: "for"
 TO.50: "to"
 STEP.50: "step"
 DO.50: "do"
 END_FOR.100: "end-for"
-
 WHILE.50: "while"
 END_WHILE.100: "end-while"
-
 REPEAT.50: "repeat"
 UNTIL.50: "until"
-
 IF.50: "if"
 THEN.50: "then"
 ELSE.50: "else"
 END_IF.100: "end-if"
-
 BEGIN.60: "begin"
 END.60: "end"
-
 CALL.50: "CALL"
 NULL.50: "NULL"
-
 AND.50: "and"
 OR.50: "or"
 NOT.50: "not"
 T.50: "T"
 F.50: "F"
 
-// Operadores aritméticos
+// ===== Operadores =====
 PLUS: "+"
 MINUS: "-"
 MUL: "*"
@@ -97,13 +97,13 @@ REAL_DIV: "/"
 DIV_INT.50: "div"
 MOD.50: "mod"
 
-// Techo/Piso como brackets (opcionales)
+// ===== Techo/Piso (Unicode) =====
 CEIL_OPEN: "⌈"
 CEIL_CLOSE: "⌉"
 FLOOR_OPEN: "⌊"
 FLOOR_CLOSE: "⌋"
 
-// Comparadores (ASCII + Unicode + <>)
+// ===== Comparadores =====
 EQ: "="
 NE: "!="
 NE2: "<>"
@@ -115,7 +115,7 @@ LE_U: "≤"
 GE_U: "≥"
 NE_U: "≠"
 
-// Identificadores y literales
+// ===== Tokens base =====
 NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
 NUMBER: /[0-9]+/
 
@@ -124,6 +124,5 @@ NUMBER: /[0-9]+/
 %ignore WS_INLINE
 %ignore NEWLINE
 
-// Comentarios: sólo '►...'
 COMMENT_ARROW: /►[^\n]*/
 %ignore COMMENT_ARROW
