@@ -1,0 +1,58 @@
+# ——— Python (todo el monorepo) ———
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.egg
+*.egg-info/
+.eggs/
+.build/
+dist/
+build/
+pip-wheel-metadata/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.ipynb_checkpoints/
+
+# ——— IDE / OS ———
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ——— Entornos y secretos ———
+.env
+*.env
+*.env.local
+.envrc
+*secrets*
+*.key
+*.pem
+
+# ——— Docker / Compose ———
+# (los Dockerfile sí van al repo)
+**/.dockerignore
+docker-data/
+*.local.yml
+compose.override.yml
+
+# ——— Logs ———
+*.log
+logs/
+**/logs/
+
+# ——— Docs / tmp ———
+tmp/
+**/tmp/
+~$*.docx
+*.swp

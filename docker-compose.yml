@@ -1,0 +1,17 @@
+version: "3.9"
+services:
+  orchestrator:
+    build: ./orchestrator_service
+    ports: ["8000:8000"]
+    environment:
+      PARSER_URL: http://parser:8001
+      ANALYZER_URL: http://analyzer:8002
+    depends_on: [parser, analyzer]
+
+  parser:
+    build: ./parser_service
+    ports: ["8001:8001"]
+
+  analyzer:
+    build: ./core_analyzer_service
+    ports: ["8002:8002"]

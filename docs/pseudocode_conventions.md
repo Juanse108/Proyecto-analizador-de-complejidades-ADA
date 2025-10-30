@@ -1,0 +1,6 @@
+- Asignación: `x <- expr`
+- `if cond then ... else ... end-if`
+- `for i <- a to b (step k)? do ... end-for` (la variable conserva el primer valor que excede el límite al salir)
+- `while cond do ... end-while`
+- Comentarios con `//`
+- Variable de tamaño problema: `n`

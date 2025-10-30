@@ -1,0 +1,4 @@
+i <- n
+while i > 1 do
+  i <- i / 2
+end-while
