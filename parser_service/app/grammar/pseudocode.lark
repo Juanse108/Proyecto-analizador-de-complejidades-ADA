@@ -1,41 +1,74 @@
+// ============================================================================
+// pseudocode.lark — Gramática del pseudocódigo para el microservicio
+// ============================================================================
+//
+// Define la estructura sintáctica del pseudocódigo que será analizado
+// por Lark y transformado en un Árbol de Sintaxis Abstracta (AST).
+//
+// Convenciones principales:
+// - Palabras clave en minúsculas (if, for, while, etc.).
+// - Bloques explícitos con begin/end o equivalentes.
+// - Asignaciones con "<-" o "🡨".
+// - Permite comparadores Unicode (≤, ≥, ≠).
+//
+// Estructura general:
+//   program → lista de procedimientos o sentencias.
+//   stmt    → sentencia (asignación, bucle, condicional, etc.).
+// ============================================================================
+
 ?start: program
 program: (proc_def | stmt)*
 
+// ---------------------------------------------------------------------------
+// SENTENCIAS PRINCIPALES
+// ---------------------------------------------------------------------------
+// Nota: no se permiten bloques o procedimientos dentro de stmt (solo top-level)
 ?stmt: assign
      | for_loop
      | while_loop
      | repeat_loop
      | if_stmt
      | call_stmt
-     // ⬅️ OJO: no permitimos block ni proc_def como stmt
 
-// ===== Bloques y listas =====
+// ---------------------------------------------------------------------------
+// BLOQUES Y LISTAS
+// ---------------------------------------------------------------------------
 block: BEGIN stmt_list END
-stmt_list: (stmt)*                // ⬅️ (re)definida explícitamente
-block_or_list: block | stmt_list
+stmt_list: (stmt)*                // Secuencia explícita de sentencias
+block_or_list: block | stmt_list  // Permite ambas formas (p.ej., DO ... END o sin BEGIN)
 
-// ===== Procedimientos (solo top-level) =====
+// ---------------------------------------------------------------------------
+// PROCEDIMIENTOS (solo nivel superior)
+// ---------------------------------------------------------------------------
 proc_def: NAME "(" param_list? ")" BEGIN stmt_list END
 param_list: NAME ("," NAME)*
 
-// ===== Asignaciones y lvalues =====
+// ---------------------------------------------------------------------------
+// ASIGNACIONES Y LVALUES
+// ---------------------------------------------------------------------------
 assign: lvalue ASSIGN expr
 lvalue: NAME ("[" subscript_list "]")* ("." NAME ("[" subscript_list "]")* )*
 slice: expr (".." expr)?
 subscript_list: slice ("," slice)*
 
-// ===== Bucles y condicionales =====
+// ---------------------------------------------------------------------------
+// BUCLES Y CONDICIONALES
+// ---------------------------------------------------------------------------
 for_loop: FOR NAME ASSIGN expr TO expr (STEP expr)? DO block_or_list END_FOR
 while_loop: WHILE "(" bool_expr ")" DO block_or_list END_WHILE
 repeat_loop: REPEAT block_or_list UNTIL "(" bool_expr ")"
 
 if_stmt: IF "(" bool_expr ")" THEN block_or_list (ELSE block_or_list)? END_IF
 
-// ===== Llamadas =====
+// ---------------------------------------------------------------------------
+// LLAMADAS A PROCEDIMIENTOS O FUNCIONES
+// ---------------------------------------------------------------------------
 call_stmt: CALL NAME "(" arg_list? ")"
 arg_list: expr ("," expr)*
 
-// ===== Booleanas =====
+// ---------------------------------------------------------------------------
+// EXPRESIONES BOOLEANAS Y RELACIONALES
+// ---------------------------------------------------------------------------
 ?bool_expr: or_expr
 ?or_expr: and_expr (OR and_expr)*
 ?and_expr: not_expr (AND not_expr)*
@@ -43,17 +76,21 @@ arg_list: expr ("," expr)*
          | rel_expr
          | "(" bool_expr ")"
 
-// ===== Relacionales =====
 ?rel_expr: expr (rel_op expr)?
 rel_op: EQ | NE | NE2 | LT | LE | GT | GE | LE_U | GE_U | NE_U
 
-// ===== Aritmética =====
+// ---------------------------------------------------------------------------
+// EXPRESIONES ARITMÉTICAS
+// ---------------------------------------------------------------------------
 ?expr: sum
 ?sum: prod ((PLUS|MINUS) prod)*
 ?prod: unary ((MUL|REAL_DIV|DIV_INT|MOD) unary)*
 ?unary: MINUS unary -> neg
       | atom
 
+// ---------------------------------------------------------------------------
+// ÁTOMOS Y FUNCIONES
+// ---------------------------------------------------------------------------
 ?atom: NUMBER
      | T          -> true
      | F          -> false
@@ -64,7 +101,9 @@ rel_op: EQ | NE | NE2 | LT | LE | GT | GE | LE_U | GE_U | NE_U
      | FLOOR_OPEN expr FLOOR_CLOSE -> floor_brackets
      | "(" expr ")"
 
-// ===== Palabras clave =====
+// ---------------------------------------------------------------------------
+// PALABRAS CLAVE
+// ---------------------------------------------------------------------------
 ASSIGN.50: "<-" | "🡨"
 FOR.50: "for"
 TO.50: "to"
@@ -89,7 +128,9 @@ NOT.50: "not"
 T.50: "T"
 F.50: "F"
 
-// ===== Operadores =====
+// ---------------------------------------------------------------------------
+// OPERADORES ARITMÉTICOS
+// ---------------------------------------------------------------------------
 PLUS: "+"
 MINUS: "-"
 MUL: "*"
@@ -97,13 +138,17 @@ REAL_DIV: "/"
 DIV_INT.50: "div"
 MOD.50: "mod"
 
-// ===== Techo/Piso (Unicode) =====
+// ---------------------------------------------------------------------------
+// OPERADORES ESPECIALES (TECHO/PISO UNICODE)
+// ---------------------------------------------------------------------------
 CEIL_OPEN: "⌈"
 CEIL_CLOSE: "⌉"
 FLOOR_OPEN: "⌊"
 FLOOR_CLOSE: "⌋"
 
-// ===== Comparadores =====
+// ---------------------------------------------------------------------------
+// COMPARADORES
+// ---------------------------------------------------------------------------
 EQ: "="
 NE: "!="
 NE2: "<>"
@@ -115,7 +160,9 @@ LE_U: "≤"
 GE_U: "≥"
 NE_U: "≠"
 
-// ===== Tokens base =====
+// ---------------------------------------------------------------------------
+// TOKENS BASE
+// ---------------------------------------------------------------------------
 NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
 NUMBER: /[0-9]+/
 
@@ -124,5 +171,9 @@ NUMBER: /[0-9]+/
 %ignore WS_INLINE
 %ignore NEWLINE
 
+// ---------------------------------------------------------------------------
+// COMENTARIOS
+// ---------------------------------------------------------------------------
+// Permite comentarios de una línea iniciados con ►
 COMMENT_ARROW: /►[^\n]*/
 %ignore COMMENT_ARROW

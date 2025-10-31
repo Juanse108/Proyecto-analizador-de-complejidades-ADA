@@ -1,83 +1,112 @@
-# app/parser.py
-from __future__ import annotations
+"""
+parser.py — Analizador sintáctico del microservicio
+===================================================
+
+Este módulo implementa el parser encargado de convertir código
+pseudocódigo en un Árbol de Sintaxis Abstracta (AST), utilizando la
+librería Lark y los modelos definidos en `ast_models.py`.
+
+El proceso general es:
+1. Cargar la gramática Lark (`grammar/pseudocode.lark`).
+2. Construir un parser LALR contextual.
+3. Transformar el árbol sintáctico de Lark en un AST propio del dominio.
+4. Devolver un nodo raíz `Program` representando todo el programa.
+
+
+"""
+
 from pathlib import Path
-from typing import List, Iterable
+from typing import Optional, List
 from lark import Lark, Transformer, v_args, Token
 
+# Importación de clases del modelo AST
 from .ast_models import (
-    Program, Block, Assign, Call, If, For, While, Repeat, Proc,   # ⬅️ importa Proc
+    Program, Block, Assign, Call, If, For, While, Repeat, Proc,
     Num, Bool, NullLit, Var, Range, Index, Field,
-    UnOp, BinOp, FuncCall, Expr, LValue
+    UnOp, BinOp, FuncCall, LValue, SrcLoc
 )
 
 __all__ = ["parse_to_ast"]
 
-# =========================
-# Carga gramática Lark
-# =========================
+# ---------------------------------------------------------------------------
+# CONFIGURACIÓN DEL PARSER
+# ---------------------------------------------------------------------------
+
+# Ruta de la gramática del pseudocódigo
 GRAMMAR_PATH = Path(__file__).with_name("grammar").joinpath("pseudocode.lark")
+
+# Cargar la gramática
 with open(GRAMMAR_PATH, "r", encoding="utf-8") as f:
     _GRAMMAR = f.read()
 
+# Inicialización del parser LALR (contextual)
 _parser = Lark(
     _GRAMMAR,
-    start="start",  # tu .lark tiene ?start: program
+    start="start",
     parser="lalr",
     lexer="contextual",
     propagate_positions=True
 )
 
-# =========================
-# Utilidades internas
-# =========================
+# Mapa de equivalencias para operadores relacionales
 REL_MAP = {
-    "EQ": "==",
-    "NE": "!=",
-    "NE2": "!=",
-    "NE_U": "!=",
-    "LT": "<",
-    "LE": "<=",
-    "LE_U": "<=",
-    "GT": ">",
-    "GE": ">=",
-    "GE_U": ">=",
+    "EQ": "==", "NE": "!=", "LT": "<", "LE": "<=", "GT": ">", "GE": ">="
 }
 
 
-def _only_names_and_nodes(items: Iterable):
+# ---------------------------------------------------------------------------
+# FUNCIONES AUXILIARES
+# ---------------------------------------------------------------------------
+
+def _loc(tok: Token) -> SrcLoc:
     """
-    Ignora tokens que no nos interesan y conserva:
-      - Token(NAME)
-      - nodos ya transformados (Expr/Range/list)
+    Convierte un token en un objeto SrcLoc (línea y columna).
+
+    Args:
+        tok (Token): token de la gramática con atributos de posición.
+
+    Returns:
+        SrcLoc: ubicación fuente (línea y columna).
     """
-    out = []
-    for it in items:
-        if isinstance(it, Token):
-            if it.type == "NAME":
-                out.append(it)
-        else:
-            out.append(it)
-    return out
+    return SrcLoc(line=tok.line, column=tok.column)
 
 
 def _fold_bin(first, rest_pairs):
     """
-    Convierte secuencias (op, expr, op, expr, ...) en BinOp encadenados.
+    Aplica una secuencia de operaciones binarias (por ejemplo: a+b+c)
+    de izquierda a derecha, generando un árbol BinOp anidado.
+
+    Args:
+        first: expresión inicial.
+        rest_pairs (list): lista alternada de operadores y operandos derechos.
+
+    Returns:
+        BinOp: árbol binario compuesto.
     """
     node = first
     ops = rest_pairs[::2]
     rhs = rest_pairs[1::2]
     for op_tok, right in zip(ops, rhs):
-        op = op_tok.value
-        node = BinOp(op=op, left=node, right=right)
+        node = BinOp(op=op_tok.value, left=node, right=right)
     return node
 
 
-@v_args(inline=True)
+# ---------------------------------------------------------------------------
+# CONSTRUCCIÓN DEL AST
+# ---------------------------------------------------------------------------
+
 @v_args(inline=True)
 class BuildAST(Transformer):
-    # ========= programa / listas / bloque =========
+    """
+    Transformer que convierte el árbol sintáctico (parse tree) generado por Lark
+    en una representación interna del AST basada en `ast_models.py`.
+    """
+
+    # ==============================
+    # 1) Estructura de Programa
+    # ==============================
     def program(self, *items):
+        """Programa principal compuesto por una lista de sentencias o procedimientos."""
         body = []
         for it in items:
             if it is None:
@@ -88,8 +117,8 @@ class BuildAST(Transformer):
                 body.append(it)
         return Program(body=body)
 
-    # IMPORTANTE: mantenemos stmt_list por si aparece explícito (como en repeat_loop)
     def stmt_list(self, *stmts):
+        """Lista de sentencias secuenciales."""
         out = []
         for s in stmts:
             if s is None:
@@ -101,21 +130,19 @@ class BuildAST(Transformer):
         return out
 
     def block(self, *items):
-        # Recibe: BEGIN, [stmt, stmt, ...], END (con ?stmt_list inline)
-        from lark.lexer import Token
-        stmts = []
+        """Bloque BEGIN...END que agrupa sentencias."""
+        begin_tok: Optional[Token] = None
+        stmts: List = []
         for it in items:
             if isinstance(it, Token):
-                continue  # ignora BEGIN/END
-            if isinstance(it, list):
-                stmts.extend(it)
-            else:
-                stmts.append(it)
-        return Block(stmts=stmts)
+                if it.type == "BEGIN":
+                    begin_tok = it
+                continue
+            stmts.extend(it if isinstance(it, list) else [it])
+        return Block(stmts=stmts, loc=_loc(begin_tok) if begin_tok else (stmts[0].loc if stmts else None))
 
     def block_or_list(self, *items):
-        # Puede venir un Block o N sentencias sueltas
-        from .ast_models import Block
+        """Permite bloques explícitos o listas simples de sentencias."""
         if len(items) == 1 and isinstance(items[0], Block):
             return items[0].stmts
         out = []
@@ -128,27 +155,31 @@ class BuildAST(Transformer):
                 out.append(it)
         return out
 
-    # ——— parámetros y procedimientos ———
+    # ==============================
+    # 2) Procedimientos
+    # ==============================
     def param_list(self, *names):
-        # devuelve ['n', 'm', ...]
+        """Lista de parámetros de un procedimiento."""
         return [str(t) for t in names]
 
     def proc_def(self, name_tok, *items):
-        # NAME "(" param_list? ")" BEGIN stmt_list END
-        params: list[str] = []
-        body: list = []
+        """Definición de un procedimiento."""
+        params: List[str] = []
+        body: List = []
         for it in items:
             if it is None:
                 continue
             if isinstance(it, list):
-                # Puede ser params (list[str]) o body (list[Stmt])
                 if it and isinstance(it[0], str):
                     params = it
                 else:
                     body = it
         return Proc(name=str(name_tok), params=params, body=body)
-    # ============== literales / átomos ==============
-    def NUMBER(self, tok: Token):
+
+    # ==============================
+    # 3) Literales / Átomos
+    # ==============================
+    def NUMBER(self, tok):
         return Num(value=int(tok.value))
 
     def true(self, _):
@@ -161,12 +192,10 @@ class BuildAST(Transformer):
         return NullLit()
 
     def ceil_brackets(self, *items):
-        from lark.lexer import Token
         expr = next(x for x in items if not isinstance(x, Token))
         return FuncCall(name="ceil", args=[expr])
 
     def floor_brackets(self, *items):
-        from lark.lexer import Token
         expr = next(x for x in items if not isinstance(x, Token))
         return FuncCall(name="floor", args=[expr])
 
@@ -174,115 +203,116 @@ class BuildAST(Transformer):
         args = list(maybe_args[0]) if (maybe_args and isinstance(maybe_args[0], list)) else []
         return FuncCall(name=str(name_tok), args=args)
 
-    # ============== rel_op: evita "Tree(Token('RULE','rel_op'),...)" ==============
     def rel_op(self, tok):
         return tok
 
-    # ============== lvalues e índices ==============
+    # ==============================
+    # 4) LValues / Accesos
+    # ==============================
     def slice(self, *parts):
-        if len(parts) == 1:
-            return parts[0]
-        return Range(lo=parts[0], hi=parts[1])
+        """Genera un rango (slice) de índices."""
+        return parts[0] if len(parts) == 1 else Range(lo=parts[0], hi=parts[1])
+
+    def subscript_list(self, *items):
+        return list(items)
 
     def lvalue(self, *items):
-        def _only_names_and_nodes(items):
-            out = []
-            for it in items:
-                if isinstance(it, Token):
-                    if it.type == "NAME":
-                        out.append(it)
-                else:
-                    out.append(it)
-            return out
-
-        seq = _only_names_and_nodes(items)
-        assert seq and isinstance(seq[0], Token) and seq[0].type == "NAME", "lvalue mal formado"
+        """Construye una referencia a variable, índice o campo."""
+        seq: List = []
+        for it in items:
+            if isinstance(it, Token) and it.type == "NAME":
+                seq.append(it)
+            elif not isinstance(it, Token):
+                seq.append(it)
         node: LValue = Var(name=str(seq[0].value))
         for it in seq[1:]:
             if isinstance(it, Token) and it.type == "NAME":
                 node = Field(base=node, field=str(it.value))
             else:
-                # 'it' puede ser: Expr, Range, o lista de Expr/Range (subscript_list)
                 if isinstance(it, list):
-                    # M[i,j] => Index(Index(M, i), j)
                     for sub in it:
                         node = Index(base=node, index=sub)
                 else:
                     node = Index(base=node, index=it)
         return node
 
-    # ============== sentencias ==============
-    def assign(self, target, _assign_tok, expr):
-        return Assign(target=target, expr=expr)
+    # ==============================
+    # 5) Sentencias (con ubicación)
+    # ==============================
+    def assign(self, target, assign_tok: Token, expr):
+        """Asignación: <variable> <- <expresión>."""
+        return Assign(target=target, expr=expr, loc=_loc(assign_tok))
 
-    def call_stmt(self, _CALL, name_tok: Token, *maybe_args):
+    def call_stmt(self, call_tok: Token, name_tok: Token, *maybe_args):
+        """Llamada a procedimiento."""
         args = list(maybe_args[0]) if (maybe_args and isinstance(maybe_args[0], list)) else []
-        return Call(name=str(name_tok), args=args)
+        return Call(name=str(name_tok), args=args, loc=_loc(call_tok))
 
-    def arg_list(self, *args):
-        return list(args)
-
-    def if_stmt(self, _IF, cond, _THEN, then_body, *rest):
+    def if_stmt(self, if_tok: Token, cond, _THEN, then_body, *rest):
+        """Estructura condicional IF-THEN-(ELSE)."""
         then_list = then_body if isinstance(then_body, list) else [then_body]
         else_list = None
         if rest and isinstance(rest[0], Token) and rest[0].type == "ELSE":
             raw = rest[1]
             else_list = raw if isinstance(raw, list) else [raw]
-        return If(cond=cond, then_body=then_list, else_body=else_list)
+        return If(cond=cond, then_body=then_list, else_body=else_list, loc=_loc(if_tok))
 
     def for_loop(self, *items):
-        # Tras la transformación de hijos, items ya no incluye keywords;
-        # lo seguro: filtrar a NAME/Expr/list
-        seq = []
+        """Bucle contado FOR i <- inicio TO fin [STEP paso] DO ..."""
+        for_tok: Optional[Token] = None
+        name_tok: Optional[Token] = None
+        parts: List = []
         for it in items:
             if isinstance(it, Token):
-                if it.type == "NAME":
-                    seq.append(it)
-            else:
-                seq.append(it)
-        name_tok = seq[0]
-        start = seq[1]
-        end = seq[2]
-        if len(seq) == 5:
-            step, body = seq[3], seq[4]
-        else:
-            step, body = None, seq[3]
+                if it.type == "FOR":
+                    for_tok = it
+                elif it.type == "NAME" and name_tok is None:
+                    name_tok = it
+                continue
+            parts.append(it)
+        start, end = parts[0], parts[1]
+        step, body = (parts[2], parts[3]) if len(parts) == 4 else (None, parts[2])
         body_list = body if isinstance(body, list) else [body]
-        return For(var=str(name_tok.value), start=start, end=end, step=step, inclusive=True, body=body_list)
+        return For(
+            var=str(name_tok.value) if name_tok else "",
+            start=start,
+            end=end,
+            step=step,
+            inclusive=True,
+            body=body_list,
+            loc=_loc(for_tok) if for_tok else None
+        )
 
     def while_loop(self, *items):
-        seq = [it for it in items if not isinstance(it, Token)]
-        cond, body = seq[0], seq[1]
+        """Bucle WHILE cond DO ..."""
+        while_tok: Optional[Token] = None
+        non_tokens: List = []
+        for it in items:
+            if isinstance(it, Token):
+                if it.type == "WHILE":
+                    while_tok = it
+                continue
+            non_tokens.append(it)
+        cond, body = non_tokens[0], non_tokens[1]
         body_list = body if isinstance(body, list) else [body]
-        return While(cond=cond, body=body_list)
+        return While(cond=cond, body=body_list, loc=_loc(while_tok) if while_tok else None)
 
     def repeat_loop(self, *items):
-        # REPEAT stmt_list UNTIL "(" bool_expr ")"
-        # Tras transformar, esperamos [body(list) , cond(Expr)]
-        seq = [it for it in items if not isinstance(it, Token)]
-        if len(seq) != 2:
-            # Si el cuerpo llegó como Tree('stmt_list'), retransformarlo
-            from lark import Tree
-            body = seq[0]
-            if isinstance(body, Tree) and body.data == "stmt_list":
-                body = self.stmt_list(*body.children)
-                cond = seq[-1]
-                return Repeat(body=body, until=cond)
-            # fallback defensivo
-        body, cond = seq[0], seq[1]
+        """Bucle REPEAT ... UNTIL cond."""
+        non_tokens: List = [it for it in items if not isinstance(it, Token)]
+        body, cond = non_tokens[0], non_tokens[1]
         body_list = body if isinstance(body, list) else [body]
-        return Repeat(body=body_list, until=cond)
+        rep_loc = body_list[0].loc if body_list else None
+        return Repeat(body=body_list, until=cond, loc=rep_loc)
 
-    # ============== booleanas ==============
+    # ==============================
+    # 6) Expresiones Lógicas / Aritméticas
+    # ==============================
     def or_expr(self, first, *rest):
         return _fold_bin(first, rest)
 
     def and_expr(self, first, *rest):
         return _fold_bin(first, rest)
-
-    def subscript_list(self, *items):
-        # Devuelve lista de índices: cada ítem es Expr o Range
-        return list(items)
 
     def not_expr(self, *items):
         if len(items) == 1:
@@ -291,17 +321,13 @@ class BuildAST(Transformer):
         return UnOp(op="not", expr=expr)
 
     def rel_expr(self, *items):
+        """Expresiones relacionales: <, <=, =, !=, etc."""
         if len(items) == 1:
             return items[0]
         left, op_tok, right = items
-        op = op_tok.type if isinstance(op_tok, Token) else str(op_tok)
-        # normaliza a símbolos canónicos
-        REL_MAP = {"EQ": "==", "NE": "!=", "NE2": "!=", "NE_U": "!=", "LT": "<", "LE": "<=", "LE_U": "<=", "GT": ">",
-                   "GE": ">=", "GE_U": ">="}
-        op = REL_MAP.get(op, op)
+        op = REL_MAP.get(op_tok.type, op_tok.value) if isinstance(op_tok, Token) else str(op_tok)
         return BinOp(op=op, left=left, right=right)
 
-    # ============== aritméticas ==============
     def sum(self, first, *rest):
         return _fold_bin(first, rest)
 
@@ -309,13 +335,32 @@ class BuildAST(Transformer):
         return _fold_bin(first, rest)
 
     def neg(self, *items):
-        from lark.lexer import Token
+        """Negación aritmética: -x"""
         expr = next(x for x in items if not isinstance(x, Token))
         return UnOp(op="-", expr=expr)
 
 
+# ---------------------------------------------------------------------------
+# FUNCIÓN PÚBLICA
+# ---------------------------------------------------------------------------
+
 def parse_to_ast(code: str) -> Program:
-    tree = _parser.parse(code)
-    ast = BuildAST().transform(tree)
-    assert isinstance(ast, Program)
-    return ast
+    """
+    Analiza un pseudocódigo y devuelve su representación interna (AST).
+
+    Args:
+        code (str): pseudocódigo en formato texto.
+
+    Returns:
+        Program: nodo raíz del árbol sintáctico abstracto.
+
+    Raises:
+        ValueError: si se detecta un error sintáctico en la entrada.
+    """
+    try:
+        tree = _parser.parse(code)
+        ast = BuildAST().transform(tree)
+        assert isinstance(ast, Program)
+        return ast
+    except Exception as e:
+        raise ValueError(f"Error de análisis sintáctico: {e}") from e

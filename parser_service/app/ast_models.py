@@ -1,155 +1,238 @@
-# app/ast_models.py
-from __future__ import annotations
+"""
+ast_models.py — Definición del Árbol de Sintaxis Abstracta (AST)
+================================================================
+
+Este módulo define las **clases de datos** que representan la estructura
+intermedia (AST) del pseudocódigo una vez parseado.
+Cada nodo es un modelo Pydantic para facilitar la validación y la
+serialización a JSON (útil en microservicios o APIs).
+
+Estructura general:
+-------------------
+1. Ubicación de tokens (SrcLoc)
+2. Expresiones (Num, Bool, Var, UnOp, BinOp, FuncCall, etc.)
+3. Sentencias (Assign, For, While, If, Repeat, Call, Block)
+4. Procedimientos y programa raíz (Proc, Program)
+
+
+"""
+
 from typing import List, Optional, Union, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field as PydField
 
 
-# ===========
-# EXPRESIONES
-# ===========
+# ---------------------------------------------------------------------------
+# 1️. UBICACIÓN EN EL CÓDIGO FUENTE
+# ---------------------------------------------------------------------------
+
+class SrcLoc(BaseModel):
+    """
+    Representa la posición de un token en el código fuente.
+
+    Atributos:
+        line (int): número de línea (1-based).
+        column (int): número de columna (1-based).
+    """
+    line: int
+    column: int
+
+
+class NodeWithLoc(BaseModel):
+    """
+    Clase base para nodos que incluyen ubicación opcional (`loc`).
+    """
+    loc: Optional[SrcLoc] = None
+
+
+# ---------------------------------------------------------------------------
+# 2. EXPRESIONES (sin ubicación)
+# ---------------------------------------------------------------------------
+
 class Num(BaseModel):
+    """Literal numérico (entero)."""
     kind: Literal["num"] = "num"
     value: int
 
 
 class Bool(BaseModel):
+    """Literal booleano (true / false)."""
     kind: Literal["bool"] = "bool"
     value: bool
 
 
 class NullLit(BaseModel):
+    """Literal nulo (NULL)."""
     kind: Literal["null"] = "null"
 
 
 class Var(BaseModel):
-    # Referencia simple a variable
+    """Referencia a una variable por nombre."""
     kind: Literal["var"] = "var"
     name: str
 
 
 class Range(BaseModel):
-    # A[lo..hi]
+    """
+    Rango de valores (por ejemplo, en bucles o subíndices).
+
+    Ejemplo:
+        1..10  →  Range(lo=1, hi=10)
+    """
     kind: Literal["range"] = "range"
     lo: "Expr"
     hi: "Expr"
 
 
 class Index(BaseModel):
-    # A[i]  o  A[lo..hi] (Range)
+    """
+    Acceso a un índice o rango de un arreglo.
+
+    Atributos:
+        base (LValue): expresión base (p. ej. variable o campo).
+        index (IndexKey): índice único o rango.
+    """
     kind: Literal["index"] = "index"
     base: "LValue"
     index: "IndexKey"  # Expr | Range
 
 
 class Field(BaseModel):
-    # x.f
+    """Acceso a un campo dentro de un registro u objeto."""
     kind: Literal["field"] = "field"
     base: "LValue"
     field: str
 
 
+# Aliases para tipos expresivos
 LValue = Union[Var, Index, Field]
 IndexKey = Union["Expr", Range]
 
 
 class UnOp(BaseModel):
-    # -x, not x
+    """Operador unario (not, -)."""
     kind: Literal["unop"] = "unop"
-    op: str  # "-", "not"
+    op: str
     expr: "Expr"
 
 
 class BinOp(BaseModel):
-    # x + y, x div y, x and y, x <= y, etc.
+    """Operador binario (por ejemplo: +, -, *, /, <, and, or, etc.)."""
     kind: Literal["binop"] = "binop"
-    op: str  # "+","-","*","/","div","mod","and","or","==","!=","<","<=",">",">="
+    op: str
     left: "Expr"
     right: "Expr"
 
 
 class FuncCall(BaseModel):
-    # length(A), ceil(x), floor(x) o cualquier f(x) usada como expresión
+    """Llamada a función integrada o definida."""
     kind: Literal["funcall"] = "funcall"
     name: str
-    args: List["Expr"] = []
+    args: List["Expr"] = PydField(default_factory=list)
 
 
-Expr = Union[
-    Num, Bool, NullLit, LValue, UnOp, BinOp, FuncCall, Range]  # Range solo aparece dentro de Index, pero se mantiene por tipado
+# Conjunto total de expresiones válidas
+Expr = Union[Num, Bool, NullLit, LValue, UnOp, BinOp, FuncCall, Range]
 
 
-# ===========
-# SENTENCIAS
-# ===========
-class Assign(BaseModel):
+# ---------------------------------------------------------------------------
+# 3. SENTENCIAS (con ubicación opcional)
+# ---------------------------------------------------------------------------
+
+class Assign(NodeWithLoc):
+    """Sentencia de asignación: <variable> <- <expresión>."""
     kind: Literal["assign"] = "assign"
-    target: "LValue"
-    expr: "Expr"
+    target: LValue
+    expr: Expr
 
 
-class Call(BaseModel):
-    # CALL f(x, y)  (llamada "void")
+class Call(NodeWithLoc):
+    """Llamada a procedimiento sin valor de retorno."""
     kind: Literal["call"] = "call"
     name: str
-    args: List[Expr] = []
+    args: List[Expr] = PydField(default_factory=list)
 
 
-class Block(BaseModel):
+class Block(NodeWithLoc):
+    """Bloque de sentencias BEGIN ... END."""
     kind: Literal["block"] = "block"
-    stmts: List["Stmt"] = []
+    stmts: List["Stmt"] = PydField(default_factory=list)
 
 
-class If(BaseModel):
+class If(NodeWithLoc):
+    """Estructura condicional IF-THEN-(ELSE)."""
     kind: Literal["if"] = "if"
-    cond: "Expr"
+    cond: Expr
     then_body: List["Stmt"]
     else_body: Optional[List["Stmt"]] = None
 
 
-class For(BaseModel):
+class For(NodeWithLoc):
+    """Bucle FOR con contador."""
     kind: Literal["for"] = "for"
     var: str
-    start: "Expr"
-    end: "Expr"
-    step: Optional["Expr"] = None
+    start: Expr
+    end: Expr
+    step: Optional[Expr] = None
     inclusive: bool = True
     body: List["Stmt"]
 
 
-class While(BaseModel):
+class While(NodeWithLoc):
+    """Bucle WHILE cond DO ..."""
     kind: Literal["while"] = "while"
-    cond: "Expr"
+    cond: Expr
     body: List["Stmt"]
 
 
-class Repeat(BaseModel):
+class Repeat(NodeWithLoc):
+    """Bucle REPEAT ... UNTIL cond."""
     kind: Literal["repeat"] = "repeat"
     body: List["Stmt"]
-    until: "Expr"
+    until: Expr
 
-# —— NUEVO: Procedimiento (solo top-level) ——
+
+# ---------------------------------------------------------------------------
+# 4️. PROCEDIMIENTOS Y PROGRAMA
+# ---------------------------------------------------------------------------
+
 class Proc(BaseModel):
+    """
+    Definición de un procedimiento.
+
+    Atributos:
+        name (str): nombre del procedimiento.
+        params (List[str]): parámetros formales.
+        body (List[Stmt]): cuerpo del procedimiento.
+    """
     kind: Literal["proc"] = "proc"
     name: str
-    params: List[str] = []
-    body: List["Stmt"]
+    params: List[str] = PydField(default_factory=list)
+    body: List["Stmt"] = PydField(default_factory=list)
 
 
-# Sentencias (no incluimos Proc aquí para impedir defs dentro de for/while/if)
-Stmt = Union[Assign, For, While, If, Repeat, "Call", "Block"]
+# Tipo unión de todas las sentencias válidas (sin incluir Proc)
+Stmt = Union[Assign, For, While, If, Repeat, Call, Block]
 
 
-# ===========
-# PROGRAMA
-# ===========
 class Program(BaseModel):
+    """
+    Nodo raíz del programa, compuesto por sentencias y/o procedimientos.
+
+    Atributos:
+        body (List[Union[Stmt, Proc]]): lista de instrucciones principales.
+    """
     kind: Literal["program"] = "program"
-    # Top-level acepta tanto procedimientos como sentencias
-    body: List[Union[Stmt, Proc]]
+    body: List[Union[Stmt, Proc]] = PydField(default_factory=list)
 
 
-# Reconstruye referencias hacia delante (Pydantic v2)
-for _M in (Range, Index, Field, UnOp, BinOp, FuncCall, Assign, Call, Block, If, For, While, Repeat, Program):
+# ---------------------------------------------------------------------------
+# 5️. RECONSTRUCCIÓN DE REFERENCIAS CIRCULARES
+# ---------------------------------------------------------------------------
+
+# Pydantic requiere este paso para resolver forward refs
+for _M in (
+        Range, Index, Field, UnOp, BinOp, FuncCall,
+        Assign, Call, Block, If, For, While, Repeat,
+        Proc, Program,
+):
     _M.model_rebuild()
-
-Program.model_rebuild()
