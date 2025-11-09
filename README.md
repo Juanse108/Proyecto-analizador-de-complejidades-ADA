@@ -72,6 +72,7 @@ docker compose up --build
  - Orchestrator: http://localhost:8000/docs
  - Parser:       http://localhost:8001/docs
  - Analyzer:     http://localhost:8002/docs
+ - LLM(Gemini):  http://localhost:8003/docs
 
 
 
