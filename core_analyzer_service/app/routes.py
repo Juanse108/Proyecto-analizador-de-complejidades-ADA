@@ -7,7 +7,7 @@ from .complexity_ir import to_json
 
 app = FastAPI()
 
-class AnalyzeAstReq(BaseModel):
+class AnalyzeAstReq(BaseModel):  
     ast: dict
 
 class AnalyzeAstResp(BaseModel):

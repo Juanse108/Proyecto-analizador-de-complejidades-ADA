@@ -10,3 +10,5 @@ def cost_compare():
 
 def cost_seq(*costs):
     return add(*costs)
+
+

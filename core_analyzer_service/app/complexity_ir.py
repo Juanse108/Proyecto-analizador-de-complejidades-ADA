@@ -71,7 +71,7 @@ def mul(*xs: Expr) -> Expr:
     n_exp = 0  # acumulamos potencias de n
     logs: List[Log] = []
     for x in xs:
-        if isinstance(x, Const):
+        if isinstance(x, Const):   
             if x.k == 0:
                 return Const(0)
             cprod *= x.k

@@ -76,7 +76,7 @@ def analyze_for(node: dict) -> Tuple[Expr, Expr]:
     total_best = mul(iters, body_best if not isinstance(body_best, Const) else add(body_best))
     
     return (total_worst, total_best)
-
+ 
 def analyze_while(node: dict) -> Tuple[Expr, Expr]:
     """Devuelve (worst, best) para un bucle WHILE."""
     # (El análisis de O(log n) es el mismo)
