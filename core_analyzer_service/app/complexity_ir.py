@@ -180,3 +180,32 @@ def to_json(e: Expr):
         return {"factors": [to_json(f) for f in e.factors]}
     # fallback
     return str(e)
+
+
+def get_dominant_term(e: Expr, dominant_func=max) -> Expr:
+    """
+    Extrae el término dominante de una expresión 'Add' usando una función
+    (max para Big-O, min para Big-Omega).
+    """
+    if isinstance(e, Add):
+        terms = e.terms
+        if not terms:
+            return Const(1)
+            
+        # Compara tuplas de (grado_polinomial, grado_logarítmico)
+        dominant_term = dominant_func(
+            terms, 
+            key=lambda t: degree(t) if not (isinstance(t, Const) and t.k <= 0) else (-float('inf'), -float('inf'))
+        )
+        return dominant_term
+    return e
+
+def big_o_str_from_expr(e: Expr) -> str:
+    """Devuelve la cadena de Big-O (peor caso) para una expresión."""
+    dominant_term = get_dominant_term(e, dominant_func=max)
+    return big_o_str(dominant_term) # big_o_str ya simplifica el término
+
+def big_omega_str_from_expr(e: Expr) -> str:
+    """Devuelve la cadena de Big-Omega (mejor caso) para una expresión."""
+    dominant_term = get_dominant_term(e, dominant_func=min)
+    return big_o_str(dominant_term) # big_o_str puede formatear el término

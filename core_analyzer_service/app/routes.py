@@ -1,36 +1,34 @@
+# ... (importaciones) ...
+from typing import Any, Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Any
 from .analyzer import analyze_program
-from .complexity_ir import to_json  # <--- importa el serializador
+from .complexity_ir import to_json 
 
-app = FastAPI(title="Analyzer")
+app = FastAPI()
 
 class AnalyzeAstReq(BaseModel):
     ast: dict
-    objective: str | None = "worst"
-    cost_model: dict | None = None
 
 class AnalyzeAstResp(BaseModel):
     big_o: str
-    big_omega: str | None = None
-    theta: str | None = None
+    big_omega: str
+    theta: Optional[str] = None
     strong_bounds: Any | None = None
-    ir: Any
-    notes: str | None = "Iterativo MVP (seq/assign/if/for/while canónico)."
+    ir_worst: Any # Representación IR del peor caso
+    ir_best: Any  # Representación IR del mejor caso
+    notes: Optional[str] = "Iterativo MVP (O y Ω para seq/assign/if/for/while)."
 
 @app.post("/analyze-ast", response_model=AnalyzeAstResp)
 def analyze_ast(req: AnalyzeAstReq):
-    res = analyze_program(req.ast)
+    res = analyze_program(req.ast) # Esta función ahora devuelve todo
+    
     return {
         "big_o": res["big_o"],
-        "big_omega": None,
-        "theta": None,
+        "big_omega": res["big_omega"],
+        "theta": res["theta"],
         "strong_bounds": None,
-        "ir": to_json(res["ir"]),  # <--- aquí
-        "notes": "Iterativo MVP (seq/assign/if/for/while canónico)."
+        "ir_worst": to_json(res["ir_worst"]),
+        "ir_best": to_json(res["ir_best"]),
+        "notes": "Iterativo MVP (O y Ω para seq/assign/if/for/while)."
     }
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
