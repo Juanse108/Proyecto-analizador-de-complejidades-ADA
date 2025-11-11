@@ -1,179 +1,358 @@
+# app/analyzer.py
+# --------------------------------------------------------------
+# Analizador de complejidades (MVP) para AST iterativo:
+# - assign, if, for, while
+# - for: estima iteraciones y multiplica por coste del cuerpo
+# - while: detecta patrones lineales (±k) y logarítmicos (/k, *k)
+# --------------------------------------------------------------
+
 from typing import Any, List, Tuple
+
 from .complexity_ir import (
-    Expr, Const, Sym, Pow, Log, Add, Mul,
-    const, sym, add, mul, big_o_str_from_expr, big_omega_str_from_expr, to_json
+    Expr, Log, const, sym, mul,
+    big_o_str_from_expr, big_omega_str_from_expr
 )
 from .cost_model import cost_assign, cost_compare, cost_seq
 
-# Implementaciones mínimas de ayuda usadas por el analizador.
-def _is_var(node: Any, name: str = None) -> bool:
-    """Devuelve True si 'node' es una variable (AST) y opcionalmente coincide el nombre."""
+
+# -------------------- utilidades AST --------------------
+
+def _is_var(node: Any, name: str | None = None) -> bool:
     return isinstance(node, dict) and node.get("kind") == "var" and (name is None or node.get("name") == name)
 
-def _is_num(node: Any, value: Any = None) -> bool:
-    """Devuelve True si 'node' es un literal numérico y opcionalmente coincide el valor."""
+
+def _is_num(node: Any, value: Any | None = None) -> bool:
     return isinstance(node, dict) and node.get("kind") == "num" and (value is None or node.get("value") == value)
 
-def _expr_to_ir(node: Any) -> Expr:
-    """Convierte un nodo AST simple a la representación intermedia mínima usada aquí."""
-    if not isinstance(node, dict):
-        return const(0)
-    kind = node.get("kind")
-    if kind == "num":
-        return const(node.get("value", 0))
-    if kind == "var":
-        return sym(node.get("name"))
-    # casos simples para operaciones binarios si aparecen (opcional)
-    if kind == "add":
-        left = _expr_to_ir(node.get("left"))
-        right = _expr_to_ir(node.get("right"))
-        return add(left, right)
-    if kind == "mul":
-        left = _expr_to_ir(node.get("left"))
-        right = _expr_to_ir(node.get("right"))
-        return mul(left, right)
-    # fallback
-    return const(0)
 
-# -------- análisis de sentencias --------
+def _is_binop(node: Any, op: str) -> bool:
+    return isinstance(node, dict) and node.get("kind") == "binop" and node.get("op") == op
 
-def analyze_stmt_list(stmts: List[dict]) -> Tuple[Expr, Expr]:
-    """Devuelve (worst_cost, best_cost) para una lista de sentencias."""
+
+# -------------------- utilidades IR --------------------
+
+def _make_log(arg: Expr, base_k: int = 2) -> Expr:
+    """
+    Construye un nodo log(arg, base). Si la firma de Log difiere, cae
+    a un símbolo 'log n' para no romper.
+    """
+    try:
+        # Si tienes helper 'log' en complexity_ir, úsalo:
+        from .complexity_ir import log  # type: ignore
+        return log(arg, const(base_k))
+    except Exception:
+        try:
+            # Muchas implementaciones modelan Log(arg, base)
+            return Log(arg, const(base_k))  # type: ignore
+        except Exception:
+            # Fallback simbólico (degradación amable)
+            return mul(sym("log"), arg)  # aparecerá como "log n"
+
+
+def _cond_var_lt_sym_or_const(cond: dict, varname: str) -> Tuple[str, Any] | None:
+    # Devuelve ("num", c) si var < c numérico, o ("sym", name) si var < name
+    if _is_binop(cond, "<") or _is_binop(cond, "<="):
+        L, R = cond.get("left"), cond.get("right")
+        if _is_var(L, varname):
+            if _is_num(R):
+                return "num", R["value"]
+            if _is_var(R):
+                return "sym", R["name"]
+    return None
+
+
+# -------------------- entorno (valores iniciales) --------------------
+
+# Guardamos asignaciones "simples" vistas: var <- <sym|num>
+# env[var] = ("sym", nombre)  |  ("num", valor)
+def _env_record_assign(env: dict, st: dict) -> None:
+    if st.get("kind") != "assign":
+        return
+    tgt = st.get("target")
+    expr = st.get("expr")
+    if not _is_var(tgt):
+        return
+    vname = tgt["name"]
+    if _is_var(expr):  # var <- m  (símbolo)
+        env[vname] = ("sym", expr["name"])
+    elif _is_num(expr):  # var <- 42 (constante)
+        env[vname] = ("num", expr["value"])
+    else:
+        # expresión no soportada para inferir tope
+        env.pop(vname, None)
+
+
+# -------------------- análisis de listas --------------------
+
+def analyze_stmt_list(stmts: List[dict], env: dict | None = None) -> Tuple[Expr, Expr]:
+    """
+    Devuelve (worst, best) para una lista secuencial.
+    'env' propaga asignaciones simples para que while reconozca inicializaciones.
+    """
+    if env is None:
+        env = {}
+
     worst_costs: List[Expr] = []
     best_costs: List[Expr] = []
-    
+
     for s in stmts:
-        w_cost, b_cost = analyze_stmt(s)
+        w_cost, b_cost = analyze_stmt(s, env)  # <-- pasa env
         worst_costs.append(w_cost)
         best_costs.append(b_cost)
-        
-    # La complejidad secuencial es el MAX de los costos
+
+        # Si es una asignación simple, actualiza el entorno (para el siguiente stmt)
+        if s.get("kind") == "assign":
+            _env_record_assign(env, s)
+
     total_worst = cost_seq(*worst_costs) if worst_costs else const(0)
     total_best = cost_seq(*best_costs) if best_costs else const(0)
-    
-    return (total_worst, total_best)
+    return total_worst, total_best
+
+
+# -------------------- análisis de FOR --------------------
 
 def analyze_for(node: dict) -> Tuple[Expr, Expr]:
-    """Devuelve (worst, best) para un bucle FOR."""
     start = node.get("start")
     end = node.get("end")
     step = node.get("step")
 
-    # (El cálculo de 'iters' es el mismo para peor y mejor caso aquí)
-    iters: Expr
-    if _is_num(start, 1) and _is_var(end, "n") and (step is None):
-        iters = sym("n")
+    if _is_num(start, 1) and _is_var(end) and (step is None):
+        iters = sym(end["name"])
     elif _is_num(start, 1) and _is_num(end):
         iters = const(max(0, end["value"]))
+    elif _is_var(end):
+        iters = sym(end["name"])
     else:
-        iters = sym("n") if _is_var(end, "n") else const(1)
+        iters = const(1)
 
     body = node.get("body") or []
-    (body_worst, body_best) = analyze_stmt_list(body)
+    # Env local para el cuerpo: así capturamos `j <- m` antes del while interno
+    body_env: dict = {}
+    body_worst, body_best = analyze_stmt_list(body, env=body_env)
 
-    # Coste total = iters * body_cost
-    total_worst = mul(iters, body_worst if not isinstance(body_worst, Const) else add(body_worst))
-    total_best = mul(iters, body_best if not isinstance(body_best, Const) else add(body_best))
-    
-    return (total_worst, total_best)
- 
-def analyze_while(node: dict) -> Tuple[Expr, Expr]:
-    """Devuelve (worst, best) para un bucle WHILE."""
-    # (El análisis de O(log n) es el mismo)
-    
-    # Detecta patrones del bucle logarítmico
+    total = mul(iters, body_worst)
+    return total, total  # Θ: for determinista
+
+
+# -------------------- patrones para WHILE --------------------
+
+def _assign_div_const(body: List[dict], varname: str) -> int | None:
+    """Busca: var <- var / k  (k>1). Devuelve k si lo encuentra."""
+    for st in body:
+        if st.get("kind") != "assign":
+            continue
+        tgt = st.get("target")
+        expr = st.get("expr")
+        if not _is_var(tgt, varname):
+            continue
+        if _is_binop(expr, "/") and _is_var(expr.get("left"), varname) and _is_num(expr.get("right")):
+            k = expr["right"]["value"]
+            try:
+                k = int(k)
+            except Exception:
+                return None
+            if k > 1:
+                return k
+    return None
+
+
+def _assign_mul_const(body: List[dict], varname: str) -> int | None:
+    """Busca: var <- var * k (k>1)."""
+    for st in body:
+        if st.get("kind") != "assign":
+            continue
+        tgt = st.get("target")
+        expr = st.get("expr")
+        if not _is_var(tgt, varname):
+            continue
+        if _is_binop(expr, "*") and _is_var(expr.get("left"), varname) and _is_num(expr.get("right")):
+            k = expr["right"]["value"]
+            try:
+                k = int(k)
+            except Exception:
+                return None
+            if k > 1:
+                return k
+    return None
+
+
+def _assign_add_const(body: List[dict], varname: str) -> int | None:
+    """Busca: var <- var + k (k>0)."""
+    for st in body:
+        if st.get("kind") != "assign":
+            continue
+        tgt = st.get("target")
+        expr = st.get("expr")
+        if not _is_var(tgt, varname):
+            continue
+        if _is_binop(expr, "+") and _is_var(expr.get("left"), varname) and _is_num(expr.get("right")):
+            k = expr["right"]["value"]
+            try:
+                k = int(k)
+            except Exception:
+                return None
+            if k > 0:
+                return k
+    return None
+
+
+def _assign_sub_const(body: List[dict], varname: str) -> int | None:
+    """Busca: var <- var - k (k>0)."""
+    for st in body:
+        if st.get("kind") != "assign":
+            continue
+        tgt = st.get("target")
+        expr = st.get("expr")
+        if not _is_var(tgt, varname):
+            continue
+        if _is_binop(expr, "-") and _is_var(expr.get("left"), varname) and _is_num(expr.get("right")):
+            k = expr["right"]["value"]
+            try:
+                k = int(k)
+            except Exception:
+                return None
+            if k > 0:
+                return k
+    return None
+
+
+def _cond_var_gt_const(cond: dict, varname: str) -> bool:
+    """Detecta (var > c) o (var >= c) con c numérico."""
+    if _is_binop(cond, ">") or _is_binop(cond, ">="):
+        l, r = cond.get("left"), cond.get("right")
+        return _is_var(l, varname) and _is_num(r)
+    return False
+
+
+def _cond_var_lt_const(cond: dict, varname: str) -> bool:
+    """Detecta (var < c) o (var <= c) con c numérico."""
+    if _is_binop(cond, "<") or _is_binop(cond, "<="):
+        l, r = cond.get("left"), cond.get("right")
+        return _is_var(l, varname) and _is_num(r)
+    return False
+
+
+def analyze_while(node: dict, env: dict | None = None) -> Tuple[Expr, Expr]:
+    if env is None:
+        env = {}
+
     cond = node.get("cond", {})
-    is_i_gt_1 = (cond.get("kind") == "gt" and 
-                 _is_var(cond.get("left"), "i") and 
-                 _is_num(cond.get("right"), 1))
-    
     body = node.get("body") or []
-    divides_by_2 = any(st.get("kind") == "assign" and 
-                      _is_var(st.get("left"), "i") and 
-                      st.get("right", {}).get("kind") == "div" and 
-                      _is_var(st.get("right", {}).get("left"), "i") and 
-                      _is_num(st.get("right", {}).get("right"), 2) 
-                      for st in body)
-    
-    # Simplificación: el cuerpo se analiza igual para O y Ω
-    body_cost_terms: List[Tuple[Expr, Expr]] = []
-    # ... (itera el 'body' y llama a analyze_stmt(st)) ...
-    # (body_worst, body_best) = ...
-    
-    (body_worst, body_best) = analyze_stmt_list(node.get("body") or [])
-    
-    # En el MEJOR CASO (Ω), un bucle WHILE puede no ejecutarse nunca.
-    # El costo es O(1) (solo la comprobación de la condición).
-    total_best = cost_compare() # Ω(1)
+    # Env anidado para el cuerpo (no contaminar el exterior)
+    body_env = dict(env)
+    body_worst, body_best = analyze_stmt_list(body, env=body_env)
 
-    # En el PEOR CASO (O), usamos el patrón detectado.
-    total_worst: Expr
-    if is_i_gt_1 and divides_by_2:
-        # O(log n) * O(body_worst)
-        total_worst = mul(Log(sym("n")), body_worst)
-    else:
-        # AVISO: El código original tenía un error aquí. Asumía O(1) (solo body_cost).
-        # Deberíamos asumir O(n) si el patrón es desconocido, o usar el LLM.
-        # Asumamos O(n) por ahora.
-        total_worst = mul(sym("n"), body_worst) 
+    ctrl_var = None
+    if isinstance(cond, dict) and cond.get("kind") == "binop":
+        if _is_var(cond.get("left")):
+            ctrl_var = cond.get("left").get("name")
+        elif _is_var(cond.get("right")):
+            ctrl_var = cond.get("right").get("name")
 
-    return (total_worst, total_best)
+    # Helper: lee init de env para ctrl_var (("sym","m") o ("num",C))
+    def _init_of(vname: str):
+        return env.get(vname)
 
-def analyze_if(node: dict) -> Tuple[Expr, Expr]:
-    """Devuelve (worst, best) para un IF."""
-    (then_worst, then_best) = analyze_stmt_list(node.get("then_body") or [])
-    
-    else_body = node.get("else_body")
-    (else_worst, else_best) = analyze_stmt_list(else_body or [])
-    
-    # Peor Caso (O): max(then_worst, else_worst)
-    # La función 'add' (que se convierte en 'cost_seq') ya hace esto.
-    total_worst = add(cost_compare(), then_worst, else_worst)
-    
-    # Mejor Caso (Ω): min(then_best, else_best)
-    # Aquí 'add' también funciona, porque big_omega_str tomará el 'min'.
-    total_best = add(cost_compare(), then_best, else_best)
-    
-    return (total_worst, total_best)
+    if ctrl_var:
+        # ---- Halving: i > c  &  i <- i / k (k>1)  => log(init)
+        if _cond_var_gt_const(cond, ctrl_var):
+            k = _assign_div_const(body, ctrl_var)
+            if k:
+                init = _init_of(ctrl_var)
+                if init and init[0] == "sym":
+                    arg = sym(init[1])  # p.ej., m  -> log m
+                    iters = _make_log(arg, k)
+                    total = mul(iters, body_worst)
+                    return total, total
+                if init and init[0] == "num":
+                    # init constante => log(const) = O(1)
+                    return body_worst, body_worst
+                # sin info: asumimos n
+                iters = _make_log(sym("n"), k)
+                total = mul(iters, body_worst)
+                return total, total
 
-def analyze_stmt(node: dict) -> Tuple[Expr, Expr]:
-    """Devuelve (worst, best) para CUALQUIER sentencia."""
+        # ---- Doubling: i < TH  &  i <- i * k (k>1)
+        th = _cond_var_lt_sym_or_const(cond, ctrl_var)
+        if th:
+            k = _assign_mul_const(body, ctrl_var)
+            if k:
+                if th[0] == "sym":
+                    arg = sym(th[1])  # p.ej., m
+                    iters = _make_log(arg, k)
+                    total = mul(iters, body_worst)
+                    return total, total
+                else:
+                    # TH constante => O(1)
+                    return body_worst, body_worst
+
+        # ---- Lineal decremento: i > c  &  i <- i - k
+        if _cond_var_gt_const(cond, ctrl_var) and _assign_sub_const(body, ctrl_var):
+            total = mul(sym("n"), body_worst)
+            return total, total
+
+        # ---- Lineal incremento: i < c  &  i <- i + k
+        if _cond_var_lt_const(cond, ctrl_var) and _assign_add_const(body, ctrl_var):
+            total = mul(sym("n"), body_worst)
+            return total, total
+
+    # desconocido → conservador Θ(n)
+    total = mul(sym("n"), body_worst)
+    return total, total
+
+
+# -------------------- análisis de IF --------------------
+
+def analyze_if(node: dict, env: dict | None = None) -> Tuple[Expr, Expr]:
+    if env is None:
+        env = {}
+    then_worst, then_best = analyze_stmt_list(node.get("then_body") or [], env=dict(env))
+    else_worst, else_best = analyze_stmt_list(node.get("else_body") or [], env=dict(env))
+
+    total_worst = cost_seq(cost_compare(), then_worst, else_worst)
+    total_best  = cost_seq(cost_compare(), then_best,  else_best)
+    return total_worst, total_best
+
+
+def analyze_stmt(node: dict, env: dict | None = None) -> Tuple[Expr, Expr]:
+    if env is None:
+        env = {}
+
     kind = node.get("kind")
-    
+
     if kind == "assign":
-        # O(1) y Ω(1)
-        cost = cost_assign()
-        return (cost, cost)
-        
+        c = cost_assign()
+        # registra en env la asignación simple (para el stmt siguiente)
+        _env_record_assign(env, node)
+        return c, c
+
     if kind == "for":
         return analyze_for(node)
-        
-    if kind == "while":
-        return analyze_while(node)
-        
-    if kind == "if":
-        return analyze_if(node)
-        
-    # desconocido → O(1) y Ω(1)
-    cost = const(1)
-    return (cost, cost)
 
-# -------- API pública del analizador --------
+    if kind == "while":
+        return analyze_while(node, env=env)
+
+    if kind == "if":
+        return analyze_if(node, env=env)
+
+    c = const(1)
+    return c, c
+
+
+# -------------------- API pública --------------------
 
 def analyze_program(ast: dict) -> dict:
     body = ast.get("body") or []
-    (total_worst, total_best) = analyze_stmt_list(body)
-    
-    # Genera las cadenas de O y Ω usando las funciones de IR
-    o_str = big_o_str_from_expr(total_worst)
-    omega_str = big_o_str_from_expr(total_best) # Usamos la misma lógica de formato
-    
-    theta_str = o_str if o_str == omega_str else None
-    
+    total_worst, total_best = analyze_stmt_list(body, env={})
+
+    big_o = big_o_str_from_expr(total_worst)
+    big_omega = big_omega_str_from_expr(total_best)
+    theta = big_o if big_o == big_omega else None
+
     return {
         "ir_worst": total_worst,
         "ir_best": total_best,
-        "big_o": o_str,
-        "big_omega": omega_str,
-        "theta": theta_str
+        "big_o": big_o,
+        "big_omega": big_omega,
+        "theta": theta,
     }
