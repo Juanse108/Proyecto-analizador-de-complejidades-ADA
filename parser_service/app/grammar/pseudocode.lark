@@ -1,179 +1,392 @@
 // ============================================================================
-// pseudocode.lark — Gramática del pseudocódigo para el microservicio
+// pseudocode.lark — Gramática del pseudocódigo (estilo Pascal del enunciado)
 // ============================================================================
 //
-// Define la estructura sintáctica del pseudocódigo que será analizado
-// por Lark y transformado en un Árbol de Sintaxis Abstracta (AST).
+// Características principales:
 //
-// Convenciones principales:
-// - Palabras clave en minúsculas (if, for, while, etc.).
-// - Bloques explícitos con begin/end o equivalentes.
-// - Asignaciones con "<-" o "🡨".
-// - Permite comparadores Unicode (≤, ≥, ≠).
+// - Cuerpos de FOR / WHILE / IF siempre usan:
 //
-// Estructura general:
-//   program → lista de procedimientos o sentencias.
-//   stmt    → sentencia (asignación, bucle, condicional, etc.).
+//       begin
+//         ...
+//       end
+//
+//
+// - Bucle REPEAT ... UNTIL (sin begin/end en el cuerpo).
+//
+// - Una sentencia por línea (SEP = salto de línea como separador).
+//
+// - Comentarios de línea con el carácter '►', que son ignorados:
+//
+//       ► esto es un comentario
+//
+// - Asignación con "<-" o "🡨".
+//
+// - Soporte básico para:
+//     * Definición de clases a nivel superior (class_def).
+//     * Declaración de objetos dentro de bloques (Clase nombre_objeto).
+//
+// - Nivel toplevel restringido a:
+//
+//       class_def | proc_def | block
+//
+// ============================================================================
+
+
+// ============================================================================
+// 1. Inicio y unidad de compilación
 // ============================================================================
 
 ?start: program
-program: (proc_def | stmt)*
 
-// ---------------------------------------------------------------------------
-// SENTENCIAS PRINCIPALES
-// ---------------------------------------------------------------------------
-// Nota: no se permiten bloques o procedimientos dentro de stmt (solo top-level)
+// Programa completo: una o más unidades toplevel
+program: top_unit (SEP top_unit)* SEP?
+
+// Unidad toplevel: clase, procedimiento o bloque global
+top_unit: class_def | proc_def | block
+
+
+// ============================================================================
+// 2. Sentencias
+// ============================================================================
+
+// Sentencias básicas admitidas dentro de un bloque
 ?stmt: assign
+     | decl_stmt
      | for_loop
      | while_loop
      | repeat_loop
      | if_stmt
      | call_stmt
+     | expr_stmt   // p.ej. A[n], A[10][m]
 
-// ---------------------------------------------------------------------------
-// BLOQUES Y LISTAS
-// ---------------------------------------------------------------------------
+
+// ============================================================================
+// 3. Listas de sentencias (una por línea)
+// ============================================================================
+//
+// Dentro de begin ... end y repeat ... until, el enunciado asume
+// una sentencia por línea. Para soportar comentarios y líneas en blanco,
+// se modela primero la "línea" y luego la lista de líneas.
+//
+//   line: stmt? SEP
+//   stmt_list: line+
+//
+
+// Una línea: opcionalmente una sentencia, seguida de un salto de línea
+line: stmt? SEP
+
+// Lista de líneas dentro de un bloque / repeat
+stmt_list: line+
+
+
+// ============================================================================
+// 4. Bloques
+// ============================================================================
+
+// Bloque clásico BEGIN ... END que agrupa sentencias
 block: BEGIN stmt_list END
-stmt_list: (stmt)*                // Secuencia explícita de sentencias
-block_or_list: block | stmt_list  // Permite ambas formas (p.ej., DO ... END o sin BEGIN)
 
-// ---------------------------------------------------------------------------
-// PROCEDIMIENTOS (solo nivel superior)
-// ---------------------------------------------------------------------------
+
+// ============================================================================
+// 5. Procedimientos (solo nivel superior)
+// ============================================================================
+//
+// Forma general:
+//
+//   Nombre(params) begin
+//     ...
+//   end
+//
+
 proc_def: NAME "(" param_list? ")" BEGIN stmt_list END
-param_list: NAME ("," NAME)*
 
-// ---------------------------------------------------------------------------
-// ASIGNACIONES Y LVALUES
-// ---------------------------------------------------------------------------
+// Parámetro formal: permite arreglos anotados, p.ej. a[1..n], A[1..n], x, etc.
+param: NAME ("[" subscript_list "]")*
+
+// Lista de parámetros separados por coma
+param_list: param ("," param)*
+
+
+// ============================================================================
+// 6. Declaraciones
+// ============================================================================
+//
+// Declaración de objeto local dentro de un bloque:
+//
+//   Clase nombre_objeto
+//
+
+// Objeto local:   Clase nombre_objeto
+object_decl: NAME NAME
+
+// Sentencia de declaración
+decl_stmt: object_decl
+
+
+// ============================================================================
+// 7. Sentencias de expresión
+// ============================================================================
+//
+// Se utilizan para expresiones "suelta" en una línea, como:
+//
+//   A[n]
+//   A[10][m]
+//
+// que el enunciado usa a modo de “declaraciones” de tamaño de arreglo.
+//
+
+expr_stmt: expr
+
+
+// ============================================================================
+// 8. Asignaciones y L-values
+// ============================================================================
+//
+// Forma general:
+//
+//   lvalue <- expr
+//
+// L-value admite variables simples, arreglos y campos encadenados.
+//
+
 assign: lvalue ASSIGN expr
-lvalue: NAME ("[" subscript_list "]")* ("." NAME ("[" subscript_list "]")* )*
+
+// Variable, índices y acceso a campos:
+//
+//   NAME
+//   NAME[...]
+//   NAME[...].campo[...].otroCampo
+//
+lvalue: NAME ("[" subscript_list "]")*
+          ("." NAME ("[" subscript_list "]")* )*
+
+// Slice de índices: expr o expr..expr
 slice: expr (".." expr)?
+
+// Lista de índices/slices separados por coma
 subscript_list: slice ("," slice)*
 
-// ---------------------------------------------------------------------------
-// BUCLES Y CONDICIONALES
-// ---------------------------------------------------------------------------
-for_loop: FOR NAME ASSIGN expr TO expr (STEP expr)? DO block_or_list END_FOR
-while_loop: WHILE "(" bool_expr ")" DO block_or_list END_WHILE
-repeat_loop: REPEAT block_or_list UNTIL "(" bool_expr ")"
 
-if_stmt: IF "(" bool_expr ")" THEN block_or_list (ELSE block_or_list)? END_IF
+// ============================================================================
+// 9. Bucles y condicionales
+// ============================================================================
 
-// ---------------------------------------------------------------------------
-// LLAMADAS A PROCEDIMIENTOS O FUNCIONES
-// ---------------------------------------------------------------------------
+// for i <- a to b [step s] do begin ... end
+for_loop: FOR NAME ASSIGN expr TO expr (STEP expr)? DO block
+
+// while (condicion) do begin ... end
+while_loop: WHILE "(" bool_expr ")" DO block
+
+// repeat ... until (condicion)   (SIN begin/end en el cuerpo)
+repeat_loop: REPEAT stmt_list UNTIL "(" bool_expr ")"
+
+// if (cond) then begin ... end [else begin ... end]
+//
+// Se permite que el ELSE vaya en la línea siguiente, gracias al SEP? opcional.
+//
+if_stmt: IF "(" bool_expr ")" THEN block (SEP? ELSE block)?
+
+
+// ============================================================================
+// 10. Llamadas a procedimientos/funciones
+// ============================================================================
+
+// Llamada como sentencia: CALL f(...)
 call_stmt: CALL NAME "(" arg_list? ")"
+
+// Lista de argumentos separados por coma
 arg_list: expr ("," expr)*
 
-// ---------------------------------------------------------------------------
-// EXPRESIONES BOOLEANAS Y RELACIONALES
-// ---------------------------------------------------------------------------
+
+// ============================================================================
+// 11. Expresiones booleanas y relacionales
+// ============================================================================
+
 ?bool_expr: or_expr
+
 ?or_expr: and_expr (OR and_expr)*
+
 ?and_expr: not_expr (AND not_expr)*
+
 ?not_expr: NOT not_expr
          | rel_expr
          | "(" bool_expr ")"
 
+// Expresión relacional opcionalmente con operador
 ?rel_expr: expr (rel_op expr)?
+
+// Operadores relacionales disponibles
 rel_op: EQ | NE | NE2 | LT | LE | GT | GE | LE_U | GE_U | NE_U
 
-// ---------------------------------------------------------------------------
-// EXPRESIONES ARITMÉTICAS
-// ---------------------------------------------------------------------------
+
+// ============================================================================
+// 12. Expresiones aritméticas
+// ============================================================================
+//
+// Precedencias:
+//
+//   unary (-) > prod (*, /, div, mod) > sum (+, -)
+//
+
 ?expr: sum
-?sum: prod ((PLUS|MINUS) prod)*
-?prod: unary ((MUL|REAL_DIV|DIV_INT|MOD) unary)*
-?unary: MINUS unary -> neg
+
+?sum:  prod ((PLUS | MINUS) prod)*
+
+?prod: unary ((MUL | REAL_DIV | DIV_INT | MOD) unary)*
+
+// Negativo unario y átomos
+?unary: MINUS unary    -> neg
       | atom
 
-// ---------------------------------------------------------------------------
-// ÁTOMOS Y FUNCIONES
-// ---------------------------------------------------------------------------
+
+// ============================================================================
+// 13. Átomos y llamadas a función
+// ============================================================================
+//
+// Incluye:
+//
+//   - Literales numéricos y booleanos.
+//   - NULL.
+//   - L-values (variables, arreglos, campos).
+//   - Llamadas a función f(...) en contexto de expresión.
+//   - Techo/piso con símbolos Unicode.
+//   - Paréntesis (expr).
+//
+
 ?atom: NUMBER
      | T          -> true
+     | TRUE       -> true
      | F          -> false
+     | FALSE      -> false
      | NULL
      | lvalue
      | NAME "(" arg_list? ")"   -> func_call
-     | CEIL_OPEN expr CEIL_CLOSE  -> ceil_brackets
-     | FLOOR_OPEN expr FLOOR_CLOSE -> floor_brackets
+     | CEIL_OPEN  expr CEIL_CLOSE   -> ceil_brackets
+     | FLOOR_OPEN expr FLOOR_CLOSE  -> floor_brackets
      | "(" expr ")"
 
-// ---------------------------------------------------------------------------
-// PALABRAS CLAVE
-// ---------------------------------------------------------------------------
+
+// ============================================================================
+// 14. Clases (top-level)
+// ============================================================================
+//
+// Forma general:
+//
+//   Casa {Area color propietario}
+//
+
+class_def: NAME LBRACE attr_list? RBRACE
+
+// Lista de atributos de la clase, p.ej. "Area color propietario"
+attr_list: NAME (NAME)*
+
+
+// ============================================================================
+// 15. Palabras clave (case-insensitive)
+// ============================================================================
+//
+// Los sufijos `.50` / `.60` son prioridades de terminal en Lark.
+// Se usan para resolver conflictos entre KEYWORDS y NAME.
+//
+
 ASSIGN.50: "<-" | "🡨"
-FOR.50: "for"
-TO.50: "to"
-STEP.50: "step"
-DO.50: "do"
-END_FOR.100: "end-for"
-WHILE.50: "while"
-END_WHILE.100: "end-while"
-REPEAT.50: "repeat"
-UNTIL.50: "until"
-IF.50: "if"
-THEN.50: "then"
-ELSE.50: "else"
-END_IF.100: "end-if"
-BEGIN.60: "begin"
-END.60: "end"
-CALL.50: "CALL"
-NULL.50: "NULL"
-AND.50: "and"
-OR.50: "or"
-NOT.50: "not"
+
+FOR.50:    /(?i:for)/
+TO.50:     /(?i:to)/
+STEP.50:   /(?i:step)/
+DO.50:     /(?i:do)/
+WHILE.50:  /(?i:while)/
+REPEAT.50: /(?i:repeat)/
+UNTIL.50:  /(?i:until)/
+
+IF.50:     /(?i:if)/
+THEN.50:   /(?i:then)/
+ELSE.50:   /(?i:else)/
+
+BEGIN.60:  /(?i:begin)/
+END.60:    /(?i:end)/
+
+CALL.50:   /(?i:call)/
+
+NULL.50:   /(?i:null)/
+
+AND.50:    /(?i:and)/
+OR.50:     /(?i:or)/
+NOT.50:    /(?i:not)/
+
+// Constantes booleanas en mayúscula (T/F).
+// En minúscula se tokenizan como NAME.
 T.50: "T"
 F.50: "F"
 
-// ---------------------------------------------------------------------------
-// OPERADORES ARITMÉTICOS
-// ---------------------------------------------------------------------------
-PLUS: "+"
-MINUS: "-"
-MUL: "*"
-REAL_DIV: "/"
-DIV_INT.50: "div"
-MOD.50: "mod"
+TRUE.50:  /(?i:true)/
+FALSE.50: /(?i:false)/
 
-// ---------------------------------------------------------------------------
-// OPERADORES ESPECIALES (TECHO/PISO UNICODE)
-// ---------------------------------------------------------------------------
-CEIL_OPEN: "⌈"
+
+// ============================================================================
+// 16. Operadores aritméticos
+// ============================================================================
+
+PLUS:      "+"
+MINUS:     "-"
+MUL:       "*"
+REAL_DIV:  "/"
+DIV_INT.50: /(?i:div)/
+MOD.50:     /(?i:mod)/
+
+
+// ============================================================================
+// 17. Operadores especiales techo/piso (Unicode)
+// ============================================================================
+
+CEIL_OPEN:  "⌈"
 CEIL_CLOSE: "⌉"
 FLOOR_OPEN: "⌊"
-FLOOR_CLOSE: "⌋"
+FLOOR_CLOSE:"⌋"
 
-// ---------------------------------------------------------------------------
-// COMPARADORES
-// ---------------------------------------------------------------------------
-EQ: "="
-NE: "!="
-NE2: "<>"
-LE: "<="
-LT: "<"
-GE: ">="
-GT: ">"
+
+// ============================================================================
+// 18. Comparadores
+// ============================================================================
+
+EQ:   "="
+NE:   "!="
+NE2:  "<>"
+LE:   "<="
+LT:   "<"
+GE:   ">="
+GT:   ">"
 LE_U: "≤"
 GE_U: "≥"
 NE_U: "≠"
 
-// ---------------------------------------------------------------------------
-// TOKENS BASE
-// ---------------------------------------------------------------------------
-NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
+
+// ============================================================================
+// 19. Tokens base
+// ============================================================================
+
+LBRACE: "{"
+RBRACE: "}"
+
+NAME:   /[a-zA-Z_][a-zA-Z0-9_]*/
 NUMBER: /[0-9]+/
 
-%import common.WS_INLINE
-%import common.NEWLINE
-%ignore WS_INLINE
-%ignore NEWLINE
 
-// ---------------------------------------------------------------------------
-// COMENTARIOS
-// ---------------------------------------------------------------------------
-// Permite comentarios de una línea iniciados con ►
+// ============================================================================
+// 20. Separadores, espacios y comentarios
+// ============================================================================
+//
+// SEP: uno o más saltos de línea (separador de sentencias).
+// WS_INLINE: espacios/tabs en la misma línea, ignorados.
+// COMMENT_ARROW: comentario de línea iniciado por '►', hasta el fin de línea.
+//
+
+// SEP = uno o más saltos de línea (separador de sentencias)
+SEP: /(\r?\n)+/
+
+%import common.WS_INLINE
+%ignore WS_INLINE
+
+// Comentarios de línea con '►'
 COMMENT_ARROW: /►[^\n]*/
 %ignore COMMENT_ARROW

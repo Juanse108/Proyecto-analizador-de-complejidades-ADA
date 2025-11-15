@@ -31,7 +31,7 @@ htmlcov/
 Thumbs.db
 
 # ——— Entornos y secretos ———
-.env.example
+.env
 .env
 *.env
 *.env.local

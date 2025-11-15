@@ -19,4 +19,15 @@ services:
 
   llm:
     build: ./llm_service
-    ports: ["8003:8003"]
+    ports: [ "8003:8003" ]
+    environment:
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_TIMEOUT: ${GEMINI_TIMEOUT:-30}
+      LLM_RETRY_MAX: ${LLM_RETRY_MAX:-4}
+      LLM_RETRY_BASE: ${LLM_RETRY_BASE:-0.7}
+      # 👇 fallbacks válidos (quita el 1.5-flash “a secas”)
+      LLM_FALLBACK_MODELS: ${LLM_FALLBACK_MODELS:-gemini-2.0-flash,gemini-1.5-pro,gemini-1.5-flash-latest}
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
