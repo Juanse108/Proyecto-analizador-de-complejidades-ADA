@@ -550,7 +550,7 @@ class BuildAST(Transformer):
         Estructura condicional IF-THEN-[ELSE].
 
         La gramática es:
-            if_stmt: IF "(" bool_expr ")" THEN SEP? block_or_list (SEP? ELSE SEP? block_or_list)?
+            if_stmt: IF "(" bool_expr ")" THEN SEP? block_or_list (ELSE SEP? block_or_list)?
 
         Con @v_args(inline=True), aquí llegan:
             - Tokens: IF, '(', ')', THEN, ELSE, SEP...

@@ -3,14 +3,23 @@
 Proveedor Gemini para normalizar lenguaje natural → pseudocódigo
 compatible con la gramática de `pseudocode.lark`.
 
-Flujo:
-1. Recibe una descripción en lenguaje natural (ToGrammarRequest.text).
-2. Construye un prompt con instrucciones estrictas de gramática.
-3. Llama al modelo Gemini para que genere SOLO un JSON:
-     {"pseudocode_normalizado":"<string>","issues":["..."]}
-4. Limpia un poco el pseudocódigo (dialect_lint) para alinearlo
-   aún más con la gramática.
-5. Devuelve ToGrammarResponse con el pseudocódigo final.
+Responsabilidades principales:
+- Construir el prompt de sistema con las reglas estrictas del dialecto
+  de pseudocódigo soportado por el parser.
+- Llamar al modelo Gemini 2.0 (con cadena de fallbacks y reintentos).
+- Extraer y validar el JSON devuelto por el modelo.
+- Postprocesar el pseudocódigo para alinearlo con el dialecto real
+  esperado por la gramática (sin cambiar la lógica del algoritmo).
+- Devolver un `ToGrammarResponse` con el pseudocódigo final y un
+  registro de issues / decisiones tomadas.
+
+Este módulo NO implementa todavía:
+- recurrence
+- classify
+- compare
+
+Esas operaciones están declaradas en la interfaz, pero levantan
+`NotImplementedError`.
 """
 
 import json
@@ -48,13 +57,17 @@ REGLAS DURAS (si no puedes cumplirlas, considera que tu respuesta es inválida):
 - TODOS los cuerpos de IF, WHILE y FOR deben ir con 'begin' y 'end',
   incluso si sólo tienen una sentencia.
 - 'begin' y 'end' DEBEN ir SIEMPRE solos en su propia línea, sin ninguna
-  sentencia en la misma línea.
-- Cada procedimiento o bloque principal debe terminar SIEMPRE con 'end'.
+  sentencia ni comentario en la misma línea.
+- Por cada 'begin' debe haber exactamente un 'end' correspondiente.
+  No agregues 'end' extra al final del programa.
+- Cada procedimiento o bloque principal debe terminar SIEMPRE con un 'end'.
 - Dentro de cada procedimiento, el número de 'begin' y 'end' debe coincidir
   y estar bien anidado. No escribas 'end' adicionales sueltos; después de cerrar
   un FOR/WHILE/IF con su 'end', NO pongas otro 'end' a menos que realmente
   estés cerrando un bloque externo (por ejemplo, el procedimiento).
 - NO uses bloques de código markdown (no uses ```).
+- NO escribas texto en lenguaje natural ni explicaciones fuera de comentarios
+  con '►'. TODO el contenido de 'pseudocode_normalizado' debe ser pseudocódigo.
 
 Si rompes alguna de estas reglas, el parser fallará.
 
@@ -63,8 +76,9 @@ Si rompes alguna de estas reglas, el parser fallará.
 ------------------------------------------------------------
 Puedes usar estas formas top-level (puedes combinarlas):
 
-a) Clases (antes del algoritmo):
-   Casa {Area color propietario}
+a) Clases (antes de los procedimientos):
+   Persona {edad altura}
+   Casa {area color propietario}
 
 b) Procedimientos (una o varias definiciones):
    Nombre(param1, param2, ...)
@@ -77,20 +91,22 @@ b) Procedimientos (una o varias definiciones):
    begin
      ...
    end
+
    Tras la línea del encabezado de un procedimiento, la SIGUIENTE línea
    debe ser EXACTAMENTE:
 
      begin
 
-   No escribas 'BEGIN' en mayúsculas en esa posición, ni repitas 'begin'
-   dos veces. Ejemplo correcto:
+   No repitas 'begin' dos veces ni uses 'BEGIN' en mayúsculas en esa posición.
+
+   Ejemplo correcto:
 
      BUSQUEDA_BINARIA(A, n, x)
      begin
        ...
      end
 
-c) Bloque principal (algoritmo “main”):
+c) Bloque principal (algoritmo “main” sin procedimiento):
    begin
      <sentencias>
    end
@@ -106,12 +122,21 @@ Una sola sentencia por línea. Las formas válidas son:
 
 - Asignación:
     variable 🡨 expresión
-    variable <- expresión              (flecha Unicode 🡨 es preferida)
+    variable <- expresión          (flecha Unicode 🡨 es preferida)
+
   Ejemplos:
     i 🡨 0
     A[i] 🡨 A[i] + 1
-    casa1.Area 🡨 10
+    persona.edad 🡨 persona.edad + 1
     B[1..j] 🡨 C[1..j]
+    M[i, j] 🡨 0
+
+- Sentencia RETURN (si el problema lo requiere):
+    return
+    return expresión
+
+  Usa 'return' como sentencia dentro de un bloque, en su propia línea.
+  No mezcles 'return' con otras sentencias en la misma línea.
 
 - Bucle FOR:
     for i 🡨 inicio to limite do
@@ -136,26 +161,30 @@ Una sola sentencia por línea. Las formas válidas son:
       <sentencias>
     until (condición)
 
-  NOTA: REPEAT NO lleva 'begin/end' en el cuerpo; sólo las sentencias
-        directamente entre repeat y until.
+  NOTA: REPEAT NO lleva 'begin/end' en el cuerpo; sólo sentencias
+        directamente entre 'repeat' y 'until'.
 
-- Condicional IF:
+- Condicional IF (ELSE opcional):
+
+  Sin ELSE:
     if (condición) then
     begin
-      <sentencias>
+      <sentencias-then>
     end
 
+  Con ELSE:
     if (condición) then
     begin
-      <sentencias>
+      <sentencias-then>
     end
     else
     begin
-      <sentencias>
+      <sentencias-else>
     end
 
-  El 'else' es opcional.
-  NO uses 'end-if', 'end-while' ni 'end-for'. Solo se usa 'end' para cerrar bloques.
+  El 'else' debe ir en una línea aparte justo después del 'end' del then,
+  como en los ejemplos anteriores.
+  NO uses 'end-if', 'end-while' ni 'end-for': solo se usa 'end' para cerrar bloques.
   NO uses 'else if'. Si necesitas varias condiciones, anida otro 'if' dentro del 'else'.
 
 - Llamadas a subrutinas:
@@ -164,18 +193,19 @@ Una sola sentencia por línea. Las formas válidas son:
   En expresiones:
     resultado 🡨 NombreFunc(arg1, arg2)
 
-- (Opcional) Objetos y arreglos locales:
+- Objetos y arreglos (se asume que ya están declarados):
     Clase nombre_objeto
     nombre_objeto.campo 🡨 5
     A[i] 🡨 B[i]
     A[1..j] 🡨 B[1..j]
+    M[i, j] 🡨 M[i, j] + 1
 
 ------------------------------------------------------------
 3) EXPRESIONES, BOOLEANOS Y OPERADORES
 ------------------------------------------------------------
 
 - Booleanos:
-    and, or, not  (short-circuiting)
+    and, or, not
 
 - Valores booleanos:
     T, F (preferidos), también se aceptan true, false.
@@ -188,7 +218,7 @@ Una sola sentencia por línea. Las formas válidas son:
 
 - Operadores de techo/piso:
     ⌈expr⌉   (techo)
-    ⌊expr⌉   (piso)
+    ⌊expr⌋   (piso)
 
 - Acceso a arreglos:
     A[i]
@@ -211,8 +241,8 @@ Una sola sentencia por línea. Las formas válidas son:
 
 - Formato:
     * Una sentencia por línea.
-    * 'begin' y 'end' deben ir solos en su propia línea (NUNCA pongas código
-      en la misma línea que 'begin' o 'end').
+    * 'begin' y 'end' deben ir solos en su propia línea
+      (NUNCA pongas código ni comentarios en la misma línea).
     * Usa paréntesis en IF, WHILE y UNTIL:
         if (condición) then
         while (condición) do
@@ -225,7 +255,10 @@ Una sola sentencia por línea. Las formas válidas son:
 ------------------------------------------------------------
 
 - Debes responder SOLO con un JSON válido, sin texto adicional.
-- Dentro del JSON, los saltos de línea se representan con '\n'.
+- El JSON debe estar MINIFICADO: sin saltos de línea ni espacios innecesarios
+  fuera de las cadenas. Ejemplo:
+  {"pseudocode_normalizado":"...","issues":["...","..."]}
+- Dentro del JSON, los saltos de línea del pseudocódigo se representan con '\n'.
 - 'pseudocode_normalizado' debe contener SOLO el pseudocódigo final.
 - 'issues' es una lista de comentarios breves sobre problemas o decisiones
   que tomaste (puede ir vacía [] si todo fue bien).
@@ -259,40 +292,57 @@ Salida JSON:
 # 2. SANITIZADORES / POST-PROCESADO DEL PSEUDOCÓDIGO
 # ============================================================================
 
-def _strip_global_begin_end_if_procs(s: str) -> str:
+def _trim_trailing_orphan_ends(s: str) -> str:
     """
-    Si hay procedimientos top-level, elimina un posible BEGIN/END global
-    que envuelva TODO, para que el programa sea:
-        Proc1(...)
-        begin ... end
+    Recorta 'end' huérfanos al final del texto cuando hay más END que BEGIN.
 
-        Proc2(...)
-        begin ... end
-    y no:
-        begin
-          Proc1(...)
-          ...
-        end
+    Estrategia:
+    - Cuenta cuántos BEGIN/begin y END/end hay en todas las líneas.
+    - Mientras sobren END y la última línea sea un END/end aislado, se elimina
+      esa última línea.
+    - No modifica END que estén en medio del código.
+
+    Args:
+        s: Texto completo de pseudocódigo.
+
+    Returns:
+        El mismo texto pero sin 'end' sobrantes al final.
     """
-    has_proc = (
-            re.search(r"(?m)^[A-Za-z_]\w*\s*\([^)]*\)\s*\nBEGIN\b", s) is not None
-            or re.search(r"(?m)^[A-Za-z_]\w*\s*\([^)]*\)\s*\nbegin\b", s) is not None
-    )
-    if has_proc:
-        s = re.sub(r"(?mis)^\s*BEGIN\s*\n", "", s, count=1)
-        s = re.sub(r"(?mis)^\s*begin\s*\n", "", s, count=1)
-        s = re.sub(r"(?mis)\nEND\s*$", "", s, count=1)
-        s = re.sub(r"(?mis)\nend\s*$", "", s, count=1)
-    return s.strip()
+    lines = s.rstrip().splitlines()
+
+    def count_begin_end(ls):
+        begins = 0
+        ends = 0
+        for ln in ls:
+            begins += len(re.findall(r'\b(BEGIN|begin)\b', ln))
+            ends += len(re.findall(r'\b(END|end)\b', ln))
+        return begins, ends
+
+    begins, ends = count_begin_end(lines)
+
+    # Mientras sobren END y la última línea sea solo un END/end, recórtala
+    while ends > begins and lines and re.match(r'^\s*(END|end)\s*$', lines[-1]):
+        lines.pop()
+        begins, ends = count_begin_end(lines)
+
+    return "\n".join(lines)
 
 
 def _split_collapsed_keywords(s: str) -> str:
     """
     Inserta un salto de línea si 'BEGIN'/'begin' o 'END'/'end' están pegados
-    al siguiente token. Ejemplos:
+    al siguiente token.
+
+    Ejemplos:
         'BEGINif'  -> 'BEGIN\\nif'
         'BEGINn1'  -> 'BEGIN\\nn1'
         'ENDMERGE' -> 'END\\nMERGE'
+
+    Args:
+        s: Texto de pseudocódigo posiblemente colapsado.
+
+    Returns:
+        Texto con BEGIN/END garantizados como tokens separados.
     """
     t = s
     t = re.sub(r'(?im)\b(BEGIN|begin)(?=\S)', r'\1\n', t)
@@ -300,11 +350,55 @@ def _split_collapsed_keywords(s: str) -> str:
     return t
 
 
+def _collapse_end_else(s: str) -> str:
+    """
+    Une patrones del tipo:
+
+        end
+        else
+
+    en:
+
+        end else
+
+    para que la gramática (que espera ELSE en la misma línea) lo pueda parsear.
+
+    Solo actúa cuando 'end' y 'else' están en líneas consecutivas con posible
+    espacio en blanco intermedio.
+
+    Args:
+        s: Texto de pseudocódigo.
+
+    Returns:
+        Texto con los patrones end/else normalizados a una sola línea.
+    """
+    return re.sub(
+        r"(?mi)^(\s*end)\s*\n\s*(else)\b",
+        r"\1 \2",
+        s,
+    )
+
+
 def _ensure_proc_blocks(s: str) -> str:
     """
     Asegura únicamente que cada definición de procedimiento tenga un END de cierre.
 
-    NO inserta BEGIN automáticamente (ya se exige en el prompt del sistema).
+    No inserta BEGIN automáticamente (eso se exige en el prompt del sistema).
+
+    Detecta bloques de la forma:
+
+        Nombre(params)
+        begin / BEGIN
+        ... cuerpo ...
+
+    hasta el siguiente encabezado de procedimiento o EOF. Si el cuerpo no termina
+    en END/end, se agrega un END extra en una nueva línea.
+
+    Args:
+        s: Texto de pseudocódigo.
+
+    Returns:
+        Texto con procedimientos cerrados correctamente con END.
     """
     t = s
 
@@ -332,6 +426,31 @@ def _ensure_proc_blocks(s: str) -> str:
 
 
 def _dialect_lint(s: str) -> str:
+    """
+    Aplica una serie de normalizaciones ligeras al pseudocódigo generado
+    por el LLM para acercarlo al dialecto aceptado por `pseudocode.lark`.
+
+    Importante:
+    - No cambia la lógica del algoritmo.
+    - Solo corrige detalles de sintaxis y formato que el modelo suele
+      equivocarse (BEGIN/END duplicados, end-if, líneas sueltas de arreglos, etc.).
+
+    Pasos principales:
+    1. Eliminar palabras clave tipo PROCEDURE / END PROCEDURE.
+    2. Separar BEGIN/END pegados a otros tokens.
+    3. Asegurar que cada procedimiento tenga BEGIN/END de cierre.
+    4. Colapsar patrones "end" + salto de línea + "else" en "end else".
+    5. Normalizar 'end-if' / 'end-while' / 'end-for' a 'end'.
+    6. Comentar líneas sueltas tipo A[n] que no son sentencias válidas.
+    7. Colapsar BEGIN BEGIN duplicados tras encabezados de procedimiento.
+    8. Normalizar saltos de línea.
+
+    Args:
+        s: Pseudocódigo generado por el modelo.
+
+    Returns:
+        Pseudocódigo normalizado, listo para ser parseado.
+    """
     t = s
 
     # 0) PROCEDURE -> quitar
@@ -339,6 +458,8 @@ def _dialect_lint(s: str) -> str:
     t = re.sub(r"(?mi)^\s*END\s+PROCEDURE\s*$", "END", t)
 
     # 1) Quitar BEGIN/END global si hay procedimientos top-level
+    # (lo dejamos comentado de momento)
+    # t = _strip_global_begin_end_if_procs(t)
 
     # 2) Dividir cualquier BEGIN/END pegado al siguiente token
     t = _split_collapsed_keywords(t)
@@ -346,18 +467,23 @@ def _dialect_lint(s: str) -> str:
     # 3) Asegurar que cada proc tenga BEGIN/END propios
     t = _ensure_proc_blocks(t)
 
-    # 3) end-if / end-while / end-for → end (por seguridad)
+    # 3b) Colapsar patrones:
+    #       end
+    #       else
+    #     → end else
+    t = _collapse_end_else(t)
+
+    # 3c) end-if / end-while / end-for → end (por seguridad)
     t = re.sub(r"(?mi)\bend-(if|while|for)\b", "end", t)
 
-    # 4) Comentar líneas sueltas del estilo A[n] con el comentario correcto '►'
+    # 4) Comentar líneas sueltas tipo A[n]
     t = re.sub(
         r"(?m)^\s*[A-Za-z_]\w*\s*\[[^\]\n]+\]\s*$",
         lambda m: "► " + m.group(0),
         t,
     )
 
-    # 6) Colapsar patrones BEGIN/begin duplicados tras un encabezado de proc
-    #    Ej: "BUSQUEDA(...)\nBEGIN\nbegin\n" -> "BUSQUEDA(...)\nbegin\n"
+    # 6) Colapsar BEGIN BEGIN duplicados tras encabezado de proc
     t = re.sub(
         r'(?mis)^([A-Za-z_]\w*\s*\([^)]*\)\s*\n)\s*(BEGIN|begin)\s*\n\s*(BEGIN|begin)\b',
         r'\1begin\n',
@@ -378,8 +504,20 @@ _JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 
 def _extract_json(raw: str) -> dict:
     """
-    Extrae el primer objeto JSON del texto del modelo.
-    Lanza ValueError si no encuentra uno válido.
+    Extrae el primer objeto JSON del texto devuelto por el modelo.
+
+    Intenta primero parsear toda la respuesta como JSON; si falla, busca
+    el primer patrón `{ ... }` con una regex y lo intenta parsear.
+
+    Args:
+        raw: Texto bruto devuelto por el LLM.
+
+    Returns:
+        Diccionario Python correspondiente al JSON encontrado.
+
+    Raises:
+        ValueError: Si no se encuentra ningún objeto JSON válido.
+        json.JSONDecodeError: Si el contenido `{...}` encontrado no es JSON válido.
     """
     raw = (raw or "").strip()
 
@@ -398,7 +536,19 @@ def _extract_json(raw: str) -> dict:
 
 
 def _clean(s: str) -> str:
-    """Normaliza saltos de línea y quita escapes literales '\\n'."""
+    """
+    Normaliza saltos de línea y convierte los escapes literales '\\n'
+    en saltos de línea reales.
+
+    Útil porque el modelo devuelve el pseudocódigo dentro de un JSON,
+    donde los saltos aparecen como '\\n'.
+
+    Args:
+        s: Texto con posibles '\\n' literales y terminadores CRLF/CR.
+
+    Returns:
+        Texto limpio, con saltos de línea '\n' y sin espacios extra en extremos.
+    """
     s = s or ""
     # 1) Pasar los '\\n' que vienen dentro del JSON del modelo a saltos reales
     s = s.replace("\\n", "\n")
@@ -412,10 +562,20 @@ def _clean(s: str) -> str:
 
 class GeminiProvider:
     """
-    Proveedor concreto que usa Google Gemini para:
-        - to_grammar: texto → pseudocódigo compatible con la gramática.
+    Proveedor concreto que usa Google Gemini 2.0 para:
 
-    Por ahora, recurrence/classify/compare quedan sin implementar.
+    - `to_grammar`: convertir texto en lenguaje natural a pseudocódigo
+      compatible con la gramática `pseudocode.lark`.
+
+    Notas:
+    - Usa una cadena de modelos de la familia `gemini-2.0-*` definida en
+      variables de entorno (modelo principal + fallbacks).
+    - Implementa reintentos exponenciales ante errores 429 / 5xx / UNAVAILABLE.
+    - Si no hay API key configurada, retorna un pseudocódigo mínimo con
+      `begin/end` envolviendo el texto original.
+
+    Los métodos `recurrence`, `classify` y `compare` están declarados pero
+    todavía no implementados.
     """
 
     def __init__(self) -> None:
@@ -453,10 +613,22 @@ class GeminiProvider:
 
     async def to_grammar(self, req: ToGrammarRequest) -> ToGrammarResponse:
         """
-        Usa Gemini para convertir lenguaje natural en pseudocódigo
-        que respete la gramática de pseudocode.lark.
+        Convierte lenguaje natural en pseudocódigo que respete la gramática
+        `pseudocode.lark`, usando el modelo Gemini 2.0.
 
-        Si no hay API key, devuelve un bloque mínimo con begin/end.
+        Flujo:
+        1. Si no hay `GEMINI_API_KEY`, retorna un bloque mínimo con begin/end
+           alrededor del texto original (fallback "bruto").
+        2. Si hay cliente, delega en `_to_grammar_sync` ejecutado en un thread
+           para no bloquear el event loop.
+
+        Args:
+            req: Petición con el texto original y pistas opcionales (`hints`).
+
+        Returns:
+            `ToGrammarResponse` con:
+            - `pseudocode_normalizado`: pseudocódigo final postprocesado.
+            - `issues`: lista de strings con decisiones, errores y metadatos.
         """
         if not self.client:
             return ToGrammarResponse(
@@ -466,17 +638,36 @@ class GeminiProvider:
         return await asyncio.to_thread(self._to_grammar_sync, req)
 
     def _to_grammar_sync(self, req: ToGrammarRequest) -> ToGrammarResponse:
+        """
+        Implementación síncrona de `to_grammar`.
+
+        Construye el prompt final con:
+        - Reglas del sistema (`SYSTEM_RULES`).
+        - Ejemplos (`EXAMPLE_PAIR`).
+        - Entrada real + pistas del usuario.
+        - Instrucción de responder SOLO con JSON.
+
+        Recorre la cadena de modelos (`self.models_chain`) hasta que uno
+        responda con un JSON válido. Si todos fallan, devuelve un bloque
+        mínimo begin/end con issues explicando cada fallo.
+
+        Args:
+            req: Petición original.
+
+        Returns:
+            `ToGrammarResponse` con pseudocódigo normalizado e issues.
+        """
         issues: List[str] = []
         user_hints = f"\nPistas: {req.hints}\n" if req.hints else ""
 
         # Prompt final enviado al modelo
         prompt = (
-                SYSTEM_RULES
-                + EXAMPLE_PAIR
-                + "\nEntrada real:\n"
-                + req.text.strip()
-                + user_hints
-                + "\nResponde SOLO con el JSON:"
+            SYSTEM_RULES
+            + EXAMPLE_PAIR
+            + "\nEntrada real:\n"
+            + req.text.strip()
+            + user_hints
+            + "\nResponde SOLO con el JSON:"
         )
 
         attempted: List[str] = []
@@ -521,11 +712,26 @@ class GeminiProvider:
 
     def _call_with_retries(self, model_name: str, prompt: str) -> Tuple[str, int]:
         """
-        Llama al modelo con reintentos en caso de errores 429 / 5xx / UNAVAILABLE
-        o respuesta vacía.
+        Llama al modelo Gemini con reintentos exponenciales ante fallos.
+
+        Se considera reintentable cuando el mensaje de error contiene:
+        - " 429", " 500", " 502", " 503", " 504" o "UNAVAILABLE"
+        - o texto que indique indisponibilidad temporal ("temporarily")
+
+        Para cada intento:
+        - Si hay texto de respuesta, se devuelve.
+        - Si la respuesta está vacía o el error no es reintentable, se aborta
+          y se lanza la excepción.
+
+        Args:
+            model_name: Nombre del modelo Gemini 2.0 a usar.
+            prompt: Prompt completo a enviar.
 
         Returns:
-            (texto_respuesta, intentos_usados)
+            Tupla `(texto_respuesta, intentos_usados)`.
+
+        Raises:
+            La última excepción capturada si todos los reintentos fallan.
         """
         attempts = 0
         last_err: Optional[Exception] = None
@@ -562,10 +768,37 @@ class GeminiProvider:
     # ----------------------------------------------------------------------
 
     async def recurrence(self, req: RecurrenceRequest) -> RecurrenceResponse:
+        """
+        (Pendiente de implementación).
+
+        En el futuro este método podrá usar Gemini para:
+        - Analizar recurrencias y sugerir soluciones (T(n), etc.).
+        - Clasificar el tipo de recurrencia (divide & conquer, DP, etc.).
+
+        Actualmente lanza NotImplementedError.
+        """
         raise NotImplementedError("recurrence (Gemini) pendiente")
 
     async def classify(self, req: ClassifyRequest) -> ClassifyResponse:
+        """
+        (Pendiente de implementación).
+
+        En el futuro este método podrá usar Gemini para:
+        - Clasificar el tipo de algoritmo / patrón con base en su pseudocódigo.
+        - Identificar si es recursivo, iterativo, divide & conquer, DP, etc.
+
+        Actualmente lanza NotImplementedError.
+        """
         raise NotImplementedError("classify (Gemini) pendiente")
 
     async def compare(self, req: CompareRequest) -> CompareResponse:
+        """
+        (Pendiente de implementación).
+
+        En el futuro este método podrá usar Gemini para:
+        - Comparar dos algoritmos (en pseudocódigo) y describir diferencias.
+        - Evaluar ventajas / desventajas a alto nivel.
+
+        Actualmente lanza NotImplementedError.
+        """
         raise NotImplementedError("compare (Gemini) pendiente")

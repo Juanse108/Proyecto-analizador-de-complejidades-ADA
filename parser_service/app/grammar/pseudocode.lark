@@ -161,7 +161,7 @@ repeat_loop: REPEAT stmt_list UNTIL "(" bool_expr ")"
 //     end
 //
 // Se permite que "else" vaya en la siguiente línea (SEP opcional antes de ELSE).
-if_stmt: IF "(" bool_expr ")" THEN SEP? block_or_list (SEP? ELSE SEP? block_or_list)?
+if_stmt: IF "(" bool_expr ")" THEN SEP? block_or_list (ELSE SEP? block_or_list)?
 
 // ---------------------------------------------------------------------------
 // 10. Llamadas a procedimientos/funciones como sentencia
