@@ -6,7 +6,7 @@
 # - while: detecta patrones lineales (±k) y logarítmicos (/k, *k)
 # --------------------------------------------------------------
 
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Optional
 
 from .complexity_ir import (
     Expr, Log, const, sym, mul,
@@ -26,7 +26,32 @@ def _is_num(node: Any, value: Any | None = None) -> bool:
 
 
 def _is_binop(node: Any, op: str) -> bool:
-    return isinstance(node, dict) and node.get("kind") == "binop" and node.get("op") == op
+    """
+    Helper flexible para comparar operadores binarios.
+    Soporta equivalentes Unicode como ≤ / ≥ / ≠.
+    """
+    if not (isinstance(node, dict) and node.get("kind") == "binop"):
+        return False
+
+    node_op = node.get("op")
+
+    # Normalizamos algunos operadores Unicode que suele sacar el parser/LLM
+    if node_op == "≤":
+        node_op = "<="
+    elif node_op == "≥":
+        node_op = ">="
+    elif node_op == "≠":
+        node_op = "!="
+
+    # También normalizamos el op esperado por si algún día le pasamos Unicode
+    if op == "≤":
+        op = "<="
+    elif op == "≥":
+        op = ">="
+    elif op == "≠":
+        op = "!="
+
+    return node_op == op
 
 
 # -------------------- utilidades IR --------------------
@@ -231,6 +256,121 @@ def _cond_var_lt_const(cond: dict, varname: str) -> bool:
         return _is_var(l, varname) and _is_num(r)
     return False
 
+def _normalize_op(op: str) -> str:
+    """Normaliza algunos operadores Unicode a ASCII."""
+    if op == "≤":
+        return "<="
+    if op == "≥":
+        return ">="
+    if op == "≠":
+        return "!="
+    return op
+
+
+def _detect_binary_search_while(cond: dict, body: List[dict], env: dict) -> Optional[Expr]:
+    """
+    Intenta detectar un while típico de búsqueda binaria:
+
+        l <- 1
+        r <- n
+        while (l <= r) do
+            m <- (l + r) div 2
+            ... (ifs)
+            l <- m + 1   o   r <- m - 1   o   r <- m
+
+    Devuelve una expresión con el número de iteraciones (~ log n),
+    o None si no reconoce el patrón.
+    """
+    if not (isinstance(cond, dict) and cond.get("kind") == "binop"):
+        return None
+
+    op = _normalize_op(cond.get("op", ""))
+    left = cond.get("left")
+    right = cond.get("right")
+
+    # Condición tipo l <= r o r >= l (dos variables)
+    if not (_is_var(left) and _is_var(right)):
+        return None
+
+    l_name = left["name"]
+    r_name = right["name"]
+
+    if op not in ("<", "<=", ">", ">="):
+        return None
+
+    # 1) Buscar m <- (l + r) div 2
+    mid_name = None
+    for st in body:
+        if st.get("kind") != "assign":
+            continue
+        tgt = st.get("target")
+        expr = st.get("expr")
+        if not _is_var(tgt):
+            continue
+
+        # expr debe ser binop "div" o "/"
+        if not (isinstance(expr, dict) and expr.get("kind") == "binop" and expr.get("op") in ("div", "/")):
+            continue
+
+        left2 = expr.get("left")
+        right2 = expr.get("right")
+
+        # (l + r) div 2  o  (r + l) div 2
+        if not (isinstance(left2, dict) and left2.get("kind") == "binop" and left2.get("op") == "+"):
+            continue
+
+        a = left2.get("left")
+        b = left2.get("right")
+        if not ((_is_var(a, l_name) and _is_var(b, r_name)) or (_is_var(a, r_name) and _is_var(b, l_name))):
+            continue
+
+        if not _is_num(right2, 2):
+            continue
+
+        mid_name = tgt["name"]
+        break
+
+    if not mid_name:
+        return None
+
+    # 2) Ver que se actualiza l o r en función de m
+    updated_low_or_high = False
+    for st in body:
+        if st.get("kind") != "assign":
+            continue
+        tgt = st.get("target")
+        expr = st.get("expr")
+        if not _is_var(tgt):
+            continue
+
+        tname = tgt["name"]
+
+        # l <- m  o  r <- m
+        if _is_var(expr, mid_name) and tname in (l_name, r_name):
+            updated_low_or_high = True
+            continue
+
+        # l <- m +/- c  o  r <- m +/- c
+        if isinstance(expr, dict) and expr.get("kind") == "binop" and expr.get("op") in ("+", "-"):
+            if _is_var(expr.get("left"), mid_name) and _is_num(expr.get("right")) and tname in (l_name, r_name):
+                updated_low_or_high = True
+                continue
+
+    if not updated_low_or_high:
+        return None
+
+    # 3) Estimar iteraciones: log_2(longitud intervalo inicial)
+    # Usamos r inicial; si no sabemos, caemos a log n.
+    hi_init = env.get(r_name)
+    if hi_init and hi_init[0] == "sym":
+        # p.ej., r <- n
+        arg = sym(hi_init[1])
+    else:
+        arg = sym("n")
+
+    iters = _make_log(arg, 2)
+    return iters
+
 
 def analyze_while(node: dict, env: dict | None = None) -> Tuple[Expr, Expr]:
     if env is None:
@@ -242,6 +382,12 @@ def analyze_while(node: dict, env: dict | None = None) -> Tuple[Expr, Expr]:
     body_env = dict(env)
     body_worst, body_best = analyze_stmt_list(body, env=body_env)
 
+    # 1) Búsqueda binaria
+    bs_iters = _detect_binary_search_while(cond, body, env)
+    if bs_iters is not None:
+        total = mul(bs_iters, body_worst)
+        return total, total
+    # 2) Resto de patrones (halving, doubling, lineal, fallback Θ(n))
     ctrl_var = None
     if isinstance(cond, dict) and cond.get("kind") == "binop":
         if _is_var(cond.get("left")):
@@ -338,12 +484,56 @@ def analyze_stmt(node: dict, env: dict | None = None) -> Tuple[Expr, Expr]:
     c = const(1)
     return c, c
 
+def _extract_main_body(ast: dict) -> List[dict]:
+    """
+    Adapta el AST que viene del microservicio de parseo a la forma
+    que espera el analizador iterativo (lista de sentencias).
+
+    Casos soportados:
+    - program -> [proc] -> body
+    - program -> body con sentencias sueltas
+    - proc -> body
+    """
+    if not isinstance(ast, dict):
+        return []
+
+    kind = ast.get("kind")
+
+    # Caso típico: raíz "program"
+    if kind == "program":
+        body = ast.get("body") or []
+
+        # Caso más común: un solo procedimiento con el algoritmo
+        if len(body) == 1 and isinstance(body[0], dict) and body[0].get("kind") == "proc":
+            return body[0].get("body") or []
+
+        # Si hay varios procs, por ahora analizamos solo el primero
+        if body and isinstance(body[0], dict) and body[0].get("kind") == "proc":
+            return body[0].get("body") or []
+
+        # Si el body ya son sentencias sueltas
+        return body
+
+    # Si nos pasan directamente un "proc"
+    if kind == "proc":
+        return ast.get("body") or []
+
+    # Fallback: intenta usar .body si existe
+    body = ast.get("body")
+    if isinstance(body, list):
+        return body
+
+    return []
+
 
 # -------------------- API pública --------------------
 
 def analyze_program(ast: dict) -> dict:
-    body = ast.get("body") or []
-    total_worst, total_best = analyze_stmt_list(body, env={})
+    # Adaptamos el AST (program/proc) a una lista de sentencias planas
+    stmts = _extract_main_body(ast)
+
+    # Reutilizamos toda la lógica que ya tienes para listas de stmts
+    total_worst, total_best = analyze_stmt_list(stmts, env={})
 
     big_o = big_o_str_from_expr(total_worst)
     big_omega = big_omega_str_from_expr(total_best)
