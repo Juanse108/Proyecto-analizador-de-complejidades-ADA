@@ -301,7 +301,7 @@ Las siguientes **20 entradas de pseudocódigo** se utilizan como conjunto de reg
     "code": "begin\nif ((x ≠ NULL) and (x.valor ≥ 10)) then begin\n  y 🡨 x.valor\nend\nelse begin\n  y 🡨 0\nend\nend"
   },
   {
-    "code": "MaxSub(a[1..n]) begin\n  best 🡨 -1\n  cur 🡨 0\n  for i 🡨 1 to n do begin\n    cur 🡨 cur + a[i]\n    if (cur > best) then begin\n      best 🡨 cur\n    end\n    else begin\n      best 🡨 best\n    end\n    if (cur < 0) then begin\n      cur 🡨 0\n    end\n    else begin\n      cur 🡨 cur\n    end\n  end\nend"
+    "code": "MaxSub(a[1..n]) begin\n  best 🡨 -1\n  cur 🡨 0\n  for i 🡨 1 to n do begin\n    cur 🡨 cur + a[i]\n    if (cur > best) then begin\n      best 🡨 cur\n    end\n    else begin\n      best 🡨 best\n    end\n    if (cur < 0) then begin\n      cur 🡨 0\n    end else begin\n      cur 🡨 cur\n      end\nend"
   },
   {
     "code": "BusquedaBinaria(A[1..n], x) begin\n  l 🡨 1\n  r 🡨 n\n  while (l ≤ r) do begin\n    m 🡨 (l + r) div 2\n    if (A[m] = x) then begin\n      r 🡨 m\n    end\n    else begin\n      r 🡨 r\n    end\n    if (A[m] < x) then begin\n      l 🡨 m + 1\n    end\n    else begin\n      r 🡨 m - 1\n    end\n  end\nend"
