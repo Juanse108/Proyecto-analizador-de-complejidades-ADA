@@ -140,14 +140,19 @@ def mul(*xs: Expr) -> Expr:
     if cprod != 1:
         out.append(Const(cprod))
 
-    # símbolos: orden alfabético para determinismo
-    for name in sorted(syms_exp.keys()):
+    # símbolos: orden con 'n' primero y luego alfabético
+    def _sym_order(name: str):
+        # Preferimos mostrar 'n' al inicio porque suele ser el tamaño principal
+        if name == "n":
+            return (0, name)
+        return (1, name)
+
+    for name in sorted(syms_exp.keys(), key=_sym_order):
         e = syms_exp[name]
         if e == 1:
             out.append(Sym(name))
         elif e > 1:
             out.append(Pow(Sym(name), e))
-        # (si e<0, en este IR no contemplamos fracciones; no debería ocurrir)
 
     # logs se mantienen (no combinamos bases; para O/Ω la base no importa)
     out.extend(logs)
@@ -183,22 +188,33 @@ def alt(*xs: Expr) -> Expr:
 
 # -------- Métrica de “grado” para comparación asintótica --------
 
+# --- Redefinición robusta de degree (incluyendo Alt) ---
+
 def degree(e: Expr) -> Tuple[int, int]:
+    """Retorna (grado_polinomial_total, grado_logarítmico_total) del Expr.
+
+    Reglas:
+    - Const -> (0, 0)
+    - Sym -> (1, 0)
+    - Pow(base=Sym, exp=k) -> (k, 0)
+    - Log -> (0, 1)
+    - Mul -> suma grados de factores
+    - Add -> grado máximo entre términos
+    - Alt -> grado máximo entre opciones (para Big-O)
     """
-    Retorna (grado_polinomial_total, grado_logaritmico_total).
-    - Cualquier Sym cuenta como 1 en el grado polinomial.
-    - Pow(base=Sym, exp=k) suma k al grado polinomial.
-    - Log contribuye 1 al grado logarítmico.
-    - Mul suma grados; Add toma el máximo (término dominante).
-    """
+    # Constante
     if isinstance(e, Const):
         return (0, 0)
+    # Variable simbólica (n, m, ...)
     if isinstance(e, Sym):
         return (1, 0)
+    # Potencia de símbolo
     if isinstance(e, Pow) and isinstance(e.base, Sym):
         return (e.exp, 0)
+    # Logaritmo
     if isinstance(e, Log):
         return (0, 1)
+    # Producto: suma grados
     if isinstance(e, Mul):
         d_poly, d_log = 0, 0
         for f in e.factors:
@@ -206,13 +222,60 @@ def degree(e: Expr) -> Tuple[int, int]:
             d_poly += p
             d_log += l
         return (d_poly, d_log)
+    # Suma: toma el mayor grado
     if isinstance(e, Add):
         if not e.terms:
             return (0, 0)
-        return max((degree(t) for t in e.terms), default=(0, 0))
-    # por defecto conservador
+        return max((degree(t) for t in e.terms), key=lambda dl: dl)
+    # Alternativas: para O() nos interesa la peor opción
+    if isinstance(e, Alt):
+        if not e.options:
+            return (0, 0)
+        return max((degree(o) for o in e.options), key=lambda dl: dl)
+    # Fallback
     return (0, 0)
 
+
+# Variables típicas de índices de bucle (no parámetros del problema)
+LOCAL_INDEX_VARS = {"i", "j", "k", "p", "q", "l", "h", "t"}
+
+def canonicalize_for_big_o(e: Expr) -> Expr:
+    """
+    Normaliza el Expr para Big-O:
+    - Cualquier Sym que sea índice local (i, j, k, ...) se mapea a 'n'.
+    - Se aplica recursivamente a Pow, Log, Mul, Add, Alt.
+    """
+    # Símbolos: colapsar índices a 'n'
+    if isinstance(e, Sym):
+        if e.name in LOCAL_INDEX_VARS:
+            return Sym("n")
+        return e
+
+    # Potencias
+    if isinstance(e, Pow):
+        base = canonicalize_for_big_o(e.base)
+        if isinstance(base, Sym):
+            return Pow(base, e.exp)
+        return base  # caso raro, pero no debería romper nada
+
+    # Logaritmos
+    if isinstance(e, Log):
+        return Log(canonicalize_for_big_o(e.arg))
+
+    # Productos
+    if isinstance(e, Mul):
+        return mul(*(canonicalize_for_big_o(f) for f in e.factors))
+
+    # Sumas
+    if isinstance(e, Add):
+        return add(*(canonicalize_for_big_o(t) for t in e.terms))
+
+    # Alternativas
+    if isinstance(e, Alt):
+        return alt(*(canonicalize_for_big_o(o) for o in e.options))
+
+    # Constantes u otros nodos
+    return e
 
 # -------- Big-O sobre el IR --------
 
@@ -319,20 +382,28 @@ def get_dominant_term(e: Expr, dominant_func=max) -> Expr:
 
 def big_o_str_from_expr(e: Expr) -> str:
     """Devuelve la cadena Big-O (peor caso) para una expresión arbitraria."""
+    # 1) Normalizar índices locales (i, j, k, ...) → n
+    e = canonicalize_for_big_o(e)
+    # 2) Elegir término dominante (Add → término con mayor grado)
     dominant_term = get_dominant_term(e, dominant_func=max)
+    # 3) Renderizarlo como string
     return big_o_str(dominant_term)
+
 
 
 # --- reemplaza por completo esta función ---
 
 def big_omega_str_from_expr(e: Expr) -> str:
     """Devuelve la cadena de Big-Ω (mejor caso) para una expresión."""
+    # Normalizar índices locales antes de razonar
+    e = canonicalize_for_big_o(e)
+
     # Ω(Alt) = min Ω(opciones); para secuencias (Add) sigue dominando el mayor término.
     if isinstance(e, Alt):
-        # Reutilizamos big_o_expr para normalizar cada opción (Add→término dominante)
         cleaned = [big_o_expr(o) for o in e.options]
         pick = min(cleaned, key=degree) if cleaned else Const(1)
         return big_o_str(pick)
 
-    dominant_term = get_dominant_term(e, dominant_func=max)  # secuencia ⇒ max
+    dominant_term = get_dominant_term(e, dominant_func=max)
     return big_o_str(dominant_term)
+
