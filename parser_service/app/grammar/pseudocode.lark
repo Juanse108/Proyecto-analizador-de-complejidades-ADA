@@ -268,8 +268,10 @@ NULL.50: /(?i:null)/
 AND.50: /(?i:and)/
 OR.50: /(?i:or)/
 NOT.50: /(?i:not)/
-T.50: "T"
-F.50: "F"
+
+T.50: /(?i:T)(?![A-Za-z0-9_])/
+F.50: /(?i:F)(?![A-Za-z0-9_])/
+
 TRUE.50: /(?i:true)/
 FALSE.50: /(?i:false)/
 RETURN.50: /(?i:return)/

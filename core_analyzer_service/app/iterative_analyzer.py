@@ -15,6 +15,7 @@ Estrategia:
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 
+from .analyzer import _make_log
 from .complexity_ir import (
     Expr, const, sym, mul, add, alt, log,
     big_o_str_from_expr, big_omega_str_from_expr,
@@ -426,6 +427,180 @@ def _analyze_for(
     return total_w, total_b, total_a, [for_line] + body_lines
 
 
+def _detect_binary_search_while(cond: dict, body: List[dict], env: dict) -> Optional[Expr]:
+    """
+    Detecta búsqueda binaria iterativa:
+
+    Patrón típico:
+        l <- 1
+        r <- n
+        while (l <= r) do
+        begin
+            m <- (l + r) div 2
+            if (A[m] = x) then
+                l <- r + 1  (o terminar)
+            else
+                if (A[m] < x) then
+                    l <- m + 1
+                else
+                    r <- m - 1
+        end
+
+    Returns:
+        log n si detecta el patrón, None en caso contrario
+    """
+    if not (isinstance(cond, dict) and cond.get("kind") == "binop"):
+        return None
+
+    # Normalizar operador Unicode
+    op = cond.get("op", "")
+    if op == "≤":
+        op = "<="
+    elif op == "≥":
+        op = ">="
+
+    left = cond.get("left")
+    right = cond.get("right")
+
+    # Verificar que sea comparación entre dos variables (l <= r o r >= l)
+    if not (_is_var(left) and _is_var(right)):
+        return None
+
+    if op not in ("<", "<=", ">", ">="):
+        return None
+
+    l_name = left["name"]
+    r_name = right["name"]
+
+    # 1) Buscar cálculo del punto medio: m <- (l + r) div 2
+    mid_name = None
+    for st in body:
+        if st.get("kind") != "assign":
+            continue
+
+        tgt = st.get("target")
+        expr = st.get("expr")
+
+        if not _is_var(tgt):
+            continue
+
+        # Debe ser división (div o /)
+        if not (isinstance(expr, dict) and
+                expr.get("kind") == "binop" and
+                expr.get("op") in ("div", "/")):
+            continue
+
+        left2 = expr.get("left")
+        right2 = expr.get("right")
+
+        # Verificar que sea (l + r) / 2
+        if not (isinstance(left2, dict) and
+                left2.get("kind") == "binop" and
+                left2.get("op") == "+"):
+            continue
+
+        a = left2.get("left")
+        b = left2.get("right")
+
+        # Puede ser l + r o r + l
+        vars_match = (
+                (_is_var(a, l_name) and _is_var(b, r_name)) or
+                (_is_var(a, r_name) and _is_var(b, l_name))
+        )
+
+        if not vars_match:
+            continue
+
+        # Debe dividir por 2
+        if not _is_num(right2, 2):
+            continue
+
+        mid_name = tgt["name"]
+        break
+
+    if not mid_name:
+        return None
+
+    # 2) Verificar que se actualiza l o r basándose en m
+    updates_found = 0
+
+    def _check_updates_recursive(stmts: List[dict]) -> int:
+        """Busca actualizaciones de l/r en cualquier nivel de anidación."""
+        count = 0
+        for st in stmts:
+            if not isinstance(st, dict):
+                continue
+
+            kind = st.get("kind")
+
+            # Verificar asignaciones directas
+            if kind == "assign":
+                tgt = st.get("target")
+                expr = st.get("expr")
+
+                if not _is_var(tgt):
+                    continue
+
+                tname = tgt["name"]
+
+                # Caso 1: l <- m o r <- m
+                if _is_var(expr, mid_name) and tname in (l_name, r_name):
+                    count += 1
+                    continue
+
+                # Caso 2: l <- m + c o r <- m - c
+                if isinstance(expr, dict) and expr.get("kind") == "binop":
+                    op = expr.get("op")
+                    if op in ("+", "-"):
+                        eleft = expr.get("left")
+                        eright = expr.get("right")
+                        if (_is_var(eleft, mid_name) and
+                                _is_num(eright) and
+                                tname in (l_name, r_name)):
+                            count += 1
+                            continue
+
+                # Caso 3: l <- r + 1 (para salir del loop)
+                if isinstance(expr, dict) and expr.get("kind") == "binop":
+                    if expr.get("op") == "+":
+                        eleft = expr.get("left")
+                        eright = expr.get("right")
+                        if (_is_var(eleft, r_name) and
+                                _is_num(eright, 1) and
+                                tname == l_name):
+                            count += 1
+                            continue
+
+            # Buscar recursivamente en estructuras anidadas
+            elif kind == "if":
+                count += _check_updates_recursive(st.get("then_body", []))
+                if st.get("else_body"):
+                    count += _check_updates_recursive(st["else_body"])
+
+            elif kind in ("for", "while"):
+                count += _check_updates_recursive(st.get("body", []))
+
+            elif kind == "block":
+                count += _check_updates_recursive(st.get("stmts", []))
+
+        return count
+
+    updates_found = _check_updates_recursive(body)
+
+    if updates_found < 2:  # Necesitamos al menos 2 actualizaciones (para l y r)
+        return None
+
+    # 3) Estimar iteraciones: log(límite superior inicial)
+    hi_init = env.get(r_name)
+
+    if hi_init and hi_init[0] == "sym":
+        arg = sym(hi_init[1])
+    else:
+        arg = sym("n")
+
+    return _make_log(arg, 2)
+
+
 def _analyze_while(
         stmt: dict,
         multiplier: Expr,
@@ -435,6 +610,31 @@ def _analyze_while(
     line = _get_line(stmt)
     cond = stmt.get("cond", {})
     body = stmt.get("body", [])
+
+    # ========== PRIORIDAD 1: BÚSQUEDA BINARIA ==========
+    # Este patrón es específico y debe chequearse PRIMERO
+    bs_iters = _detect_binary_search_while(cond, body, env)
+    if bs_iters is not None:
+        # Analizar el cuerpo con log n iteraciones
+        body_multiplier = mul(multiplier, bs_iters)
+        body_w, body_b, body_a, body_lines = _analyze_stmt_list(body, body_multiplier, dict(env))
+
+        # El cuerpo YA tiene el costo multiplicado
+        total_w = body_w
+        total_b = body_b
+        total_a = body_a
+
+        while_line = LineCostInternal(
+            line=line,
+            kind="while",
+            text=None,
+            multiplier=multiplier,
+            cost_worst=const(0),
+            cost_best=const(0),
+            cost_avg=const(0),
+        )
+
+        return total_w, total_b, total_a, [while_line] + body_lines
 
     # Detectar variable de control
     ctrl_var = None
