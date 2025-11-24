@@ -63,7 +63,6 @@ from .ast_models import (
 
 __all__ = ["parse_to_ast"]
 
-
 # ============================================================================
 # 1. CONFIGURACIÓN DEL PARSER
 # ============================================================================
@@ -314,12 +313,34 @@ class BuildAST(Transformer):
     # ==============================
     def return_stmt(self, *items):
         """
-        Sentencia 'return' [expr].
+        Sentencia return [expr].
 
-        Para el análisis de complejidad, un 'return' no aporta estructura
-        relevante, así que la tratamos como una sentencia vacía.
+        IMPORTANTE: Para el análisis de complejidad recursiva,
+        necesitamos conservar la expresión que se retorna porque
+        puede contener llamadas recursivas.
+
+        Pero como el AST de complejidad no necesita el return,
+        lo convertimos en una asignación ficticia para que
+        se conserve la expresión.
         """
-        return None
+        # Extraer solo los nodos AST (filtrar tokens)
+        expr_nodes = [it for it in items if not isinstance(it, Token)]
+
+        if not expr_nodes:
+            # return sin expresión → ignorar
+            return None
+
+        # Hay una expresión: return expr
+        expr = expr_nodes[0]
+
+        # 🔑 HACK: Convertimos "return expr" en una asignación ficticia
+        # "_return <- expr" para que se conserve la expresión en el AST
+        # Esto permite que el clasificador detecte llamadas recursivas
+        return Assign(
+            target=Var(name="_return"),
+            expr=expr,
+            loc=None
+        )
 
     def object_decl(self, type_tok: Token, name_tok: Token):
         """
@@ -455,8 +476,14 @@ class BuildAST(Transformer):
     def func_call(self, name_tok: Token, *maybe_args):
         """
         Llamada a función en una expresión: nombre(expr1, expr2, ...).
+
+        CRÍTICO: Esto genera un nodo 'funcall', NO 'call'
         """
-        args = list(maybe_args[0]) if (maybe_args and isinstance(maybe_args[0], list)) else []
+        args = []
+        if maybe_args:
+            if isinstance(maybe_args[0], list):
+                args = list(maybe_args[0])
+
         return FuncCall(name=str(name_tok), args=args)
 
     def rel_op(self, tok):
@@ -535,6 +562,19 @@ class BuildAST(Transformer):
             <lvalue> 🡨 <expr>
         """
         return Assign(target=target, expr=expr, loc=_loc(assign_tok))
+
+    def arg_list(self, *items):
+        """Lista de argumentos de una llamada."""
+        # Filtrar tokens y aplanar
+        args = []
+        for it in items:
+            if isinstance(it, Token):
+                continue
+            if isinstance(it, list):
+                args.extend(it)
+            else:
+                args.append(it)
+        return args
 
     def call_stmt(self, call_tok: Token, name_tok: Token, *maybe_args):
         """

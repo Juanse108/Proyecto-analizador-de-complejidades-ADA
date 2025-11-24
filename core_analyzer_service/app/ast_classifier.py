@@ -1,12 +1,10 @@
+# core_analyzer_service/app/ast_classifier.py
 """
 ast_classifier.py - Clasificación de algoritmos iterativos/recursivos
 =====================================================================
 
-Analiza el AST para determinar:
-- Qué funciones son recursivas (directa o indirectamente).
-- Si el programa es iterativo, recursivo o mixto.
-
-Este módulo NO calcula complejidades, solo clasifica estructuras.
+ARREGLADO: Ahora detecta funcall en TODAS las expresiones, incluyendo
+condiciones de if y asignaciones anidadas.
 """
 
 from typing import Dict, Set, List
@@ -17,17 +15,43 @@ def _build_call_graph(ast: dict) -> Dict[str, Set[str]]:
     """
     Construye el grafo de llamadas del programa.
 
-    Args:
-        ast: AST del programa (puede ser "program" con body de procs/stmts).
-
-    Returns:
-        Diccionario donde cada clave es un nombre de función y el valor
-        es el conjunto de funciones que llama.
-
-    Ejemplo:
-        {"factorial": {"factorial", "print"}, "main": {"factorial"}}
+    CORREGIDO: Busca exhaustivamente en todas las expresiones.
     """
     call_graph: Dict[str, Set[str]] = {}
+
+    def _extract_calls_from_expr(expr) -> Set[str]:
+        """
+        Extrae llamadas dentro de expresiones (recursivo profundo).
+        """
+        calls: Set[str] = set()
+
+        if not isinstance(expr, dict):
+            return calls
+
+        kind = expr.get("kind")
+
+        # ✅ Llamada dentro de expresión (funcall)
+        if kind == "funcall":
+            calls.add(expr.get("name", ""))
+            # También buscar en argumentos (llamadas anidadas)
+            for arg in expr.get("args", []):
+                calls.update(_extract_calls_from_expr(arg))
+
+        # Operadores binarios
+        elif kind == "binop":
+            calls.update(_extract_calls_from_expr(expr.get("left")))
+            calls.update(_extract_calls_from_expr(expr.get("right")))
+
+        # Operadores unarios
+        elif kind == "unop":
+            calls.update(_extract_calls_from_expr(expr.get("expr")))
+
+        # Variables con índices pueden contener llamadas
+        elif kind == "index":
+            calls.update(_extract_calls_from_expr(expr.get("base")))
+            calls.update(_extract_calls_from_expr(expr.get("index")))
+
+        return calls
 
     def _extract_calls_from_body(body: List[dict]) -> Set[str]:
         """Extrae nombres de funciones llamadas en un cuerpo de sentencias."""
@@ -39,21 +63,56 @@ def _build_call_graph(ast: dict) -> Dict[str, Set[str]]:
 
             kind = stmt.get("kind")
 
-            # Llamada explícita a procedimiento: call nombre(args)
+            # ✅ Llamada explícita: CALL nombre(args)
             if kind == "call":
                 calls.add(stmt.get("name", ""))
+                # Buscar llamadas en argumentos
+                for arg in stmt.get("args", []):
+                    calls.update(_extract_calls_from_expr(arg))
 
-            # For/While/If: recursivamente buscar en sus cuerpos
-            elif kind == "for":
-                calls.update(_extract_calls_from_body(stmt.get("body", [])))
-            elif kind == "while":
-                calls.update(_extract_calls_from_body(stmt.get("body", [])))
+            # ✅ Asignación: puede contener funcall
+            elif kind == "assign":
+                expr = stmt.get("expr")
+                if expr:
+                    calls.update(_extract_calls_from_expr(expr))
+
+            # ✅ If: buscar en CONDICIÓN + cuerpos
             elif kind == "if":
+                # ⚠️ CRÍTICO: También buscar en la condición
+                cond = stmt.get("cond")
+                if cond:
+                    calls.update(_extract_calls_from_expr(cond))
+
                 calls.update(_extract_calls_from_body(stmt.get("then_body", [])))
                 if stmt.get("else_body"):
                     calls.update(_extract_calls_from_body(stmt["else_body"]))
+
+            # ✅ While/Repeat: buscar en condición + cuerpo
+            elif kind == "while":
+                cond = stmt.get("cond")
+                if cond:
+                    calls.update(_extract_calls_from_expr(cond))
+                calls.update(_extract_calls_from_body(stmt.get("body", [])))
+
             elif kind == "repeat":
                 calls.update(_extract_calls_from_body(stmt.get("body", [])))
+                until = stmt.get("until")
+                if until:
+                    calls.update(_extract_calls_from_expr(until))
+
+            # For
+            elif kind == "for":
+                # Buscar en límites del for (raramente tienen llamadas, pero...)
+                start = stmt.get("start")
+                end = stmt.get("end")
+                if start:
+                    calls.update(_extract_calls_from_expr(start))
+                if end:
+                    calls.update(_extract_calls_from_expr(end))
+
+                calls.update(_extract_calls_from_body(stmt.get("body", [])))
+
+            # Block
             elif kind == "block":
                 calls.update(_extract_calls_from_body(stmt.get("stmts", [])))
 
@@ -80,12 +139,6 @@ def _find_recursive_functions(call_graph: Dict[str, Set[str]]) -> Set[str]:
     Detecta qué funciones son recursivas (directa o indirectamente).
 
     Usa DFS para encontrar ciclos en el grafo de llamadas.
-
-    Args:
-        call_graph: Grafo de llamadas {función: {funciones_que_llama}}.
-
-    Returns:
-        Conjunto de nombres de funciones recursivas.
     """
     recursive: Set[str] = set()
 
@@ -120,15 +173,14 @@ def classify_algorithm(ast: dict) -> ProgramMetadata:
        - "iterative": ninguna función es recursiva.
        - "recursive": al menos una función es recursiva.
        - "mixed": tiene funciones recursivas y no recursivas (raro, futuro).
-
-    Args:
-        ast: AST del programa completo.
-
-    Returns:
-        ProgramMetadata con clasificación y metadatos de funciones.
     """
     call_graph = _build_call_graph(ast)
     recursive_funcs = _find_recursive_functions(call_graph)
+
+    # 🔍 DEBUG
+    print(f"\n🔍 CLASIFICADOR:")
+    print(f"   Grafo de llamadas: {call_graph}")
+    print(f"   Funciones recursivas: {recursive_funcs}")
 
     # Construir metadatos por función
     functions_meta: Dict[str, FunctionMetadata] = {}
@@ -144,11 +196,11 @@ def classify_algorithm(ast: dict) -> ProgramMetadata:
     if not recursive_funcs:
         algorithm_kind = "iterative"
     elif len(recursive_funcs) == len(call_graph):
-        # Todas las funciones son recursivas (o el programa solo tiene una función recursiva)
         algorithm_kind = "recursive"
     else:
-        # Algunas son recursivas, otras no
         algorithm_kind = "mixed"
+
+    print(f"   Clasificación: {algorithm_kind}")
 
     return ProgramMetadata(
         algorithm_kind=algorithm_kind,
@@ -159,12 +211,6 @@ def classify_algorithm(ast: dict) -> ProgramMetadata:
 def has_main_block(ast: dict) -> bool:
     """
     Verifica si el programa tiene un bloque principal (begin...end) sin procedimientos.
-
-    Args:
-        ast: AST del programa.
-
-    Returns:
-        True si hay al menos un bloque/stmt que no sea "proc".
     """
     body = ast.get("body", [])
 
