@@ -1,8 +1,6 @@
 """
-Analizador completo de recurrencias - Basado en ADA 24A
+Analizador completo de recurrencias
 ========================================================
-
-ARREGLADO: Detecta llamadas recursivas en expresiones anidadas.
 """
 
 from typing import Optional, Tuple, List, Dict, Any
@@ -217,54 +215,33 @@ def _extract_all_calls(body: List[Dict[str, Any]], func_name: str) -> List[Tuple
     return calls
 
 
+# Reemplazo para _estimate_non_recursive_work en recursive_analyzer.py
+
 def _estimate_non_recursive_work(body: List[Dict[str, Any]], func_name: str) -> Expr:
     """
     Estima f(n), el trabajo no recursivo por nivel.
 
-    Regla simple pero útil para los casos de prueba:
+    MEJORADO: Detecta bucles anidados para f(n) = O(n²), O(n³), etc.
 
-    - Si hay bucles (for/while/repeat) o llamadas a OTRAS funciones (no recursivas),
-      asumimos f(n) = O(n).
-    - Si sólo hay unas pocas asignaciones/comparaciones → f(n) = O(1).
+    Reglas:
+    - Bucle simple (for/while) → O(n)
+    - Bucle doble anidado → O(n²)
+    - Bucle triple → O(n³)
+    - Llamada a otra función (no recursiva) → O(n) conservador
+    - Solo operaciones O(1) → O(1)
     """
-    has_loop = False
-    ops_count = 0
 
-    def visit_expr(expr: Dict[str, Any]) -> None:
-        nonlocal has_loop, ops_count
+    def _count_nested_loops(stmts: List[Dict[str, Any]], depth: int = 0) -> int:
+        """
+        Cuenta la profundidad máxima de bucles anidados.
 
-        if not isinstance(expr, dict):
-            return
-
-        kind = expr.get("kind")
-
-        if kind == "binop":
-            ops_count += 1
-            visit_expr(expr.get("left"))
-            visit_expr(expr.get("right"))
-
-        elif kind == "unop":
-            ops_count += 1
-            visit_expr(expr.get("expr"))
-
-        elif kind == "index":
-            ops_count += 1
-            visit_expr(expr.get("base"))
-            visit_expr(expr.get("index"))
-
-        elif kind == "funcall":
-            # Si es otra función distinta de la recursiva, la tratamos como
-            # trabajo "grande" (típicamente O(n), ej. MERGE en MERGE_SORT).
-            if expr.get("name") != func_name:
-                has_loop = True
-            for arg in expr.get("args", []):
-                visit_expr(arg)
-
-        elif kind in ("var", "num"):
-            ops_count += 1
-
-    def visit(stmts: List[Dict[str, Any]]) -> None:
-        nonlocal has_loop, ops_count
+        Ejemplo:
+            for i <- 1 to n do
+              for j <- 1 to n do
+                x <- x + 1
+        → profundidad = 2 → O(n²)
+        """
+        max_depth = depth
 
         for stmt in stmts or []:
             if not isinstance(stmt, dict):
@@ -272,61 +249,88 @@ def _estimate_non_recursive_work(body: List[Dict[str, Any]], func_name: str) -> 
 
             kind = stmt.get("kind")
 
-            if kind == "for":
-                has_loop = True
-                visit(stmt.get("body", []))
+            # Bucles: incrementar profundidad
+            if kind in ("for", "while", "repeat"):
+                body = stmt.get("body", [])
+                nested_depth = _count_nested_loops(body, depth + 1)
+                max_depth = max(max_depth, nested_depth)
 
-            elif kind in ("while", "repeat"):
-                has_loop = True
-                visit(stmt.get("body", []))
-
-            elif kind == "assign":
-                expr = stmt.get("expr")
-                if isinstance(expr, dict):
-                    # Si la asignación es a una llamada de función:
-                    if expr.get("kind") == "funcall":
-                        if expr.get("name") != func_name:
-                            has_loop = True
-                        for arg in expr.get("args", []):
-                            visit_expr(arg)
-                    else:
-                        ops_count += 1
-                        visit_expr(expr)
-
+            # Condicionales: no incrementan profundidad (tomar el máximo de las ramas)
             elif kind == "if":
-                cond = stmt.get("cond")
-                if cond:
-                    visit_expr(cond)
-                    ops_count += 1
-
-                visit(stmt.get("then_body", []))
+                then_depth = _count_nested_loops(stmt.get("then_body", []), depth)
                 else_body = stmt.get("else_body")
-                if else_body:
-                    visit(else_body)
-
-            elif kind == "call":
-                # Llamadas tipo "CALL F(...)" fuera de asignación
-                if stmt.get("name") != func_name:
-                    has_loop = True
-                for arg in stmt.get("args", []):
-                    visit_expr(arg)
+                else_depth = _count_nested_loops(else_body, depth) if else_body else depth
+                max_depth = max(max_depth, then_depth, else_depth)
 
             elif kind == "block":
-                visit(stmt.get("stmts", []))
+                block_depth = _count_nested_loops(stmt.get("stmts", []), depth)
+                max_depth = max(max_depth, block_depth)
 
-    visit(body)
+        return max_depth
 
-    if has_loop:
+    def _has_external_function_call(stmts: List[Dict[str, Any]]) -> bool:
+        """Detecta si llama a otras funciones (no recursivas)."""
+        for stmt in stmts or []:
+            if not isinstance(stmt, dict):
+                continue
+
+            kind = stmt.get("kind")
+
+            # Llamada explícita
+            if kind == "call":
+                if stmt.get("name") != func_name:
+                    return True
+
+            # Llamada en asignación
+            elif kind == "assign":
+                expr = stmt.get("expr")
+                if isinstance(expr, dict) and expr.get("kind") == "funcall":
+                    if expr.get("name") != func_name:
+                        return True
+
+            # Recursión en estructuras
+            elif kind == "if":
+                if _has_external_function_call(stmt.get("then_body", [])):
+                    return True
+                else_body = stmt.get("else_body")
+                if else_body and _has_external_function_call(else_body):
+                    return True
+
+            elif kind in ("for", "while", "repeat", "block"):
+                body = stmt.get("body", []) if kind != "block" else stmt.get("stmts", [])
+                if _has_external_function_call(body):
+                    return True
+
+        return False
+
+    # ========== ANÁLISIS ==========
+
+    loop_depth = _count_nested_loops(body)
+    has_external_call = _has_external_function_call(body)
+
+    # Caso 1: Llamada a otra función (ej. MERGE en MERGE_SORT) → O(n)
+    if has_external_call:
         result = sym("n")
-    elif ops_count > 0:
-        result = const(1)
+        print(f"   f(n): Llamada externa detectada → O(n)")
+
+    # Caso 2: Bucles anidados → O(n^depth)
+    elif loop_depth >= 3:
+        result = Pow(Sym("n"), 3)
+        print(f"   f(n): {loop_depth} bucles anidados → O(n³)")
+
+    elif loop_depth == 2:
+        result = Pow(Sym("n"), 2)
+        print(f"   f(n): 2 bucles anidados → O(n²)")
+
+    elif loop_depth == 1:
+        result = sym("n")
+        print(f"   f(n): 1 bucle → O(n)")
+
+    # Caso 3: Solo operaciones O(1)
     else:
         result = const(1)
+        print(f"   f(n): Sin bucles → O(1)")
 
-    print(
-        f"   Trabajo no recursivo: has_loop={has_loop}, "
-        f"ops={ops_count} → f(n)={result}"
-    )
     return result
 
 
@@ -452,6 +456,7 @@ def solve_master_theorem(rec: RecurrenceRelation) -> Tuple[Expr, int, str]:
         )
         return result, 3, explanation
 
+
 def solve_linear_recurrence(rec: RecurrenceRelation) -> Tuple[Optional[Expr], str]:
     """
     Resuelve (aproximadamente) recurrencias lineales con desplazamientos constantes:
@@ -514,7 +519,7 @@ def solve_linear_recurrence(rec: RecurrenceRelation) -> Tuple[Optional[Expr], st
 
         explanation = (
             f"Recursión lineal de orden 1: T(n) = a·T(n-1) + Θ(n^{k}) "
-            f"⇒ T(n) = Θ(n^{k+1})"
+            f"⇒ T(n) = Θ(n^{k + 1})"
         )
         return expr, explanation
 
@@ -566,10 +571,10 @@ def solve_linear_recurrence(rec: RecurrenceRelation) -> Tuple[Optional[Expr], st
     # Si llegamos aquí, no supimos resolver esta variación
     return None, ""
 
+
 # ===========================================================================
 # PATRONES CONOCIDOS
 # ===========================================================================
-
 
 
 def _complexity_str_to_expr(s: str) -> Expr:
