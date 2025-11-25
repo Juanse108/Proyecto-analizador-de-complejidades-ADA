@@ -136,3 +136,69 @@ class AnalysisError(BaseModel):
     severity: Literal["error", "warning"]
     message: str
     location: Optional[str] = None
+
+
+# Agregar a schemas.py (nuevos modelos)
+
+# ---------------------------------------------------------------------------
+# STRONG BOUNDS (COTAS FUERTES)
+# ---------------------------------------------------------------------------
+
+class StrongBounds(BaseModel):
+    """
+    Representación de cotas fuertes con constantes explícitas.
+
+    Ejemplo:
+        T(n) = 5n² + 3n + 7
+
+    Atributos:
+        formula: Fórmula completa como string ("5n² + 3n + 7")
+        terms: Lista de términos individuales con sus coeficientes
+        dominant_term: Término que domina la complejidad ("5n²")
+        constant: Término constante (7)
+        evaluated_at: Ejemplos de valores concretos para n pequeños
+    """
+    formula: str = Field(
+        description="Fórmula completa: T(n) = 5n² + 3n + 7"
+    )
+    terms: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Lista de términos: [{coef: 5, expr: 'n²', degree: (2,0)}, ...]"
+    )
+    dominant_term: Optional[str] = Field(
+        default=None,
+        description="Término dominante para Big-O"
+    )
+    constant: int = Field(
+        default=0,
+        description="Término constante aditivo"
+    )
+    evaluated_at: Optional[Dict[str, int]] = Field(
+        default=None,
+        description="Valores evaluados: {n=10: 537, n=100: 50307, ...}"
+    )
+
+
+# Modificar AnalyzeAstResp para incluir strong_bounds como objeto
+
+class analyzeAstResp(BaseModel):
+    """
+    Respuesta del análisis de complejidad (ACTUALIZADA).
+    """
+    algorithm_kind: str
+    big_o: str
+    big_omega: str
+    theta: Optional[str] = None
+
+    # ✅ NUEVO: Cotas fuertes con fórmula explícita
+    strong_bounds: Optional[StrongBounds] = Field(
+        default=None,
+        description="Fórmula explícita: T(n) = 5n² + 3n + 7"
+    )
+
+    ir_worst: Dict[str, Any]
+    ir_best: Dict[str, Any]
+    ir_avg: Optional[Dict[str, Any]] = None
+
+    lines: Optional[List[LineCost]] = None
+    notes: Optional[str] = None
