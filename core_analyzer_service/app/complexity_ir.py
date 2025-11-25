@@ -239,6 +239,7 @@ def degree(e: Expr) -> Tuple[int, int]:
 # Variables típicas de índices de bucle (no parámetros del problema)
 LOCAL_INDEX_VARS = {"i", "j", "k", "p", "q", "l", "h", "t"}
 
+
 def canonicalize_for_big_o(e: Expr) -> Expr:
     """
     Normaliza el Expr para Big-O:
@@ -276,6 +277,7 @@ def canonicalize_for_big_o(e: Expr) -> Expr:
 
     # Constantes u otros nodos
     return e
+
 
 # -------- Big-O sobre el IR --------
 
@@ -390,9 +392,6 @@ def big_o_str_from_expr(e: Expr) -> str:
     return big_o_str(dominant_term)
 
 
-
-# --- reemplaza por completo esta función ---
-
 def big_omega_str_from_expr(e: Expr) -> str:
     """Devuelve la cadena de Big-Ω (mejor caso) para una expresión."""
     # Normalizar índices locales antes de razonar
@@ -407,3 +406,143 @@ def big_omega_str_from_expr(e: Expr) -> str:
     dominant_term = get_dominant_term(e, dominant_func=max)
     return big_o_str(dominant_term)
 
+
+def to_explicit_formula(e: Expr) -> str:
+    """
+    Convierte una expresión IR a fórmula explícita con constantes.
+
+    Ejemplo:
+        add(mul(const(5), pow(sym("n"), 2)), mul(const(3), sym("n")), const(7))
+        → "5n² + 3n + 7"
+
+    Args:
+        e: Expresión del IR.
+
+    Returns:
+        String con la fórmula matemática completa.
+    """
+    # Normalizar antes de procesar
+    e = canonicalize_for_big_o(e)
+
+    if isinstance(e, Const):
+        return str(e.k)
+
+    if isinstance(e, Sym):
+        return e.name
+
+    if isinstance(e, Pow):
+        base = e.base.name if isinstance(e.base, Sym) else str(e.base)
+        if e.exp == 2:
+            return f"{base}²"
+        elif e.exp == 3:
+            return f"{base}³"
+        else:
+            return f"{base}^{e.exp}"
+
+    if isinstance(e, Log):
+        arg = e.arg.name if isinstance(e.arg, Sym) else str(e.arg)
+        if e.base == 2:
+            return f"log {arg}"
+        else:
+            return f"log_{e.base} {arg}"
+
+    if isinstance(e, Mul):
+        # Separar constantes de términos simbólicos
+        coef = 1
+        terms = []
+
+        for f in e.factors:
+            if isinstance(f, Const):
+                coef *= f.k
+            else:
+                terms.append(to_explicit_formula(f))
+
+        # Construir string
+        if coef == 1 and terms:
+            return "".join(terms)
+        elif coef == 0:
+            return "0"
+        elif not terms:
+            return str(coef)
+        else:
+            term_str = "".join(terms)
+            return f"{coef}{term_str}"
+
+    if isinstance(e, Add):
+        # Ordenar términos por grado (mayor a menor)
+        sorted_terms = sorted(e.terms, key=lambda t: degree(t), reverse=True)
+
+        parts = []
+        for i, t in enumerate(sorted_terms):
+            term_str = to_explicit_formula(t)
+
+            # Manejar signos
+            if i == 0:
+                parts.append(term_str)
+            else:
+                # Si el término comienza con "-", no agregar "+"
+                if term_str.startswith("-"):
+                    parts.append(f" {term_str}")
+                else:
+                    parts.append(f" + {term_str}")
+
+        return "".join(parts)
+
+    if isinstance(e, Alt):
+        # Para alternativas, mostrar la opción dominante
+        options = [to_explicit_formula(o) for o in e.options]
+        return f"max({', '.join(options)})"
+
+    # Fallback
+    return str(e)
+
+
+def to_explicit_formula_verbose(e: Expr) -> dict:
+    """
+    Versión detallada que devuelve la fórmula con metadata.
+
+    Returns:
+        dict con:
+            - formula: String de la fórmula completa
+            - terms: Lista de términos individuales
+            - dominant: Término dominante (para Big-O)
+            - constant: Constante aditiva
+    """
+    e = canonicalize_for_big_o(e)
+
+    result = {
+        "formula": to_explicit_formula(e),
+        "terms": [],
+        "dominant": None,
+        "constant": 0,
+    }
+
+    if isinstance(e, Add):
+        # Extraer términos
+        for t in e.terms:
+            if isinstance(t, Const):
+                result["constant"] = t.k
+            else:
+                result["terms"].append({
+                    "expr": to_explicit_formula(t),
+                    "degree": degree(t),
+                })
+
+        # Ordenar por grado
+        result["terms"].sort(key=lambda x: x["degree"], reverse=True)
+
+        # Término dominante
+        if result["terms"]:
+            result["dominant"] = result["terms"][0]["expr"]
+
+    elif isinstance(e, Const):
+        result["constant"] = e.k
+
+    else:
+        result["terms"].append({
+            "expr": to_explicit_formula(e),
+            "degree": degree(e),
+        })
+        result["dominant"] = result["terms"][0]["expr"]
+
+    return result
