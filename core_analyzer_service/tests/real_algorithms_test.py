@@ -46,13 +46,16 @@ REAL_ALGO_TEST_CASES: List[Dict[str, Any]] = [
             "  end\n"
             "end"
         ),
-        # MVP: esperamos que el analizador vea todo como lineal
+        # COMPLEJIDADES REALES:
+        #   Mejor caso: Ω(1)  (lo encuentra en A[1])
+        #   Peor caso:  O(n)  (no está o está al final)
+        #   Promedio:   Θ(n)
         "expected": {
-            "big_o": "n",
-            "big_omega": "n",
-            "theta": "n"
+            "big_o": "n",     # peor caso
+            "big_omega": "1", # mejor caso
+            "theta": "n"      # promedio / orden típico
         },
-        "notes": "Teórico: peor O(n), mejor Ω(1), pero MVP lo verá n en ambos."
+        "notes": "Teórico: peor O(n), mejor Ω(1), promedio Θ(n). Aquí reflejamos mejores/peores reales."
     },
     {
         "name": "Búsqueda binaria iterativa",
@@ -81,12 +84,16 @@ REAL_ALGO_TEST_CASES: List[Dict[str, Any]] = [
             "  end\n"
             "end"
         ),
+        # COMPLEJIDADES REALES:
+        #   Mejor caso: Ω(1)       (lo encuentra en la primera comparación)
+        #   Peor caso:  O(log n)
+        #   Promedio:   Θ(log n)
         "expected": {
-            "big_o": "log n",
-            "big_omega": "log n",
-            "theta": "log n"
+            "big_o": "log n",  # peor caso
+            "big_omega": "1",  # mejor caso
+            "theta": "log n"   # promedio
         },
-        "notes": "Clásico while que reduce el intervalo a la mitad."
+        "notes": "Clásico while que reduce el intervalo a la mitad: peor Θ(log n), mejor Θ(1)."
     },
 
     # ========== ARREGLOS / LINEAL ==========
@@ -111,12 +118,15 @@ REAL_ALGO_TEST_CASES: List[Dict[str, Any]] = [
             "  end\n"
             "end"
         ),
+        # COMPLEJIDADES REALES:
+        #   Siempre recorre de 2..n sin early exit → n-1 comparaciones.
+        #   Mejor = Peor = Promedio = Θ(n).
         "expected": {
             "big_o": "n",
             "big_omega": "n",
             "theta": "n"
         },
-        "notes": "Recorre el arreglo una sola vez."
+        "notes": "Recorre el arreglo una sola vez: mejor, peor y promedio son lineales."
     },
 
     # ========== ORDENAMIENTO: BURBUJA ==========
@@ -143,12 +153,15 @@ REAL_ALGO_TEST_CASES: List[Dict[str, Any]] = [
             "  end\n"
             "end"
         ),
+        # COMPLEJIDADES REALES:
+        #   No hay bandera, siempre recorre la suma 1 + 2 + ... + (n-1) → Θ(n^2)
+        #   Mejor = Peor = Promedio = Θ(n^2).
         "expected": {
             "big_o": "n^2",
             "big_omega": "n^2",
             "theta": "n^2"
         },
-        "notes": "Doble bucle triangular clásico O(n^2)."
+        "notes": "Doble bucle triangular clásico Θ(n^2) en todos los casos."
     },
     {
         "name": "Burbuja optimizada con bandera",
@@ -180,14 +193,19 @@ REAL_ALGO_TEST_CASES: List[Dict[str, Any]] = [
             "  end\n"
             "end"
         ),
-        # Teóricamente mejor caso es O(n), pero tu analizador seguramente dará n^2.
-        # Dejamos la expectativa en n^2 para no reventar el test por ahora.
+        # COMPLEJIDADES REALES:
+        #   Mejor caso (arreglo ya ordenado):
+        #       Solo una pasada del while externo, inner hace ~n comparaciones → Θ(n).
+        #   Peor caso (invertido):
+        #       Se comporta como burbuja normal → Θ(n^2).
+        #   Promedio:
+        #       Sigue siendo Θ(n^2) en número de comparaciones.
         "expected": {
-            "big_o": "n^2",
-            "big_omega": "n^2",
-            "theta": "n^2"
+            "big_o": "n^2",  # peor caso
+            "big_omega": "n",# mejor caso
+            "theta": "n^2"   # promedio
         },
-        "notes": "Interesante para ver best-case; por ahora esperamos n^2."
+        "notes": "Burbuja con bandera: mejor caso Θ(n), pero peor y promedio siguen siendo Θ(n^2)."
     },
 
     # ========== ORDENAMIENTO: SELECCIÓN ==========
@@ -222,12 +240,16 @@ REAL_ALGO_TEST_CASES: List[Dict[str, Any]] = [
             "  end\n"
             "end"
         ),
+        # COMPLEJIDADES REALES:
+        #   El número de comparaciones no depende del contenido:
+        #     sum_{i=1}^{n-1} (n-i) = Θ(n^2)
+        #   Mejor = Peor = Promedio = Θ(n^2).
         "expected": {
             "big_o": "n^2",
             "big_omega": "n^2",
             "theta": "n^2"
         },
-        "notes": "Bucle externo 1..n-1, interno i+1..n → O(n^2)."
+        "notes": "Bucle externo 1..n-1, interno i+1..n → Θ(n^2) en todos los casos."
     },
 
     # ========== MATRICES ==========
@@ -250,12 +272,15 @@ REAL_ALGO_TEST_CASES: List[Dict[str, Any]] = [
             "  end\n"
             "end"
         ),
+        # COMPLEJIDADES REALES:
+        #   Triple bucle completo → n * n * n iteraciones.
+        #   Mejor = Peor = Promedio = Θ(n^3).
         "expected": {
             "big_o": "n^3",
             "big_omega": "n^3",
             "theta": "n^3"
         },
-        "notes": "Triple bucle completo → O(n^3)."
+        "notes": "Triple bucle completo → Θ(n^3) siempre."
     },
 
     # ========== MIXTOS n log n ==========
@@ -276,12 +301,16 @@ REAL_ALGO_TEST_CASES: List[Dict[str, Any]] = [
             "  end\n"
             "end"
         ),
+        # COMPLEJIDADES REALES:
+        #   Inner while: j = 1,2,4,8,... ≤ n → Θ(log n) iteraciones por cada i.
+        #   Outer for: n iteraciones.
+        #   Mejor = Peor = Promedio = Θ(n log n).
         "expected": {
             "big_o": "n log n",
             "big_omega": "n log n",
             "theta": "n log n"
         },
-        "notes": "for externo n; while interno log n → n log n."
+        "notes": "for externo n; while interno log n → Θ(n log n) en todos los casos."
     }
 ]
 
