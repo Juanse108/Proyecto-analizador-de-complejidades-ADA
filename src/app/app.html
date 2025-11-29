@@ -1,0 +1,106 @@
+<div class="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 flex flex-col items-center font-sans">
+  
+  <!-- Contenedor Principal Centrado -->
+  <div class="w-full max-w-3xl space-y-8">
+    
+    <!-- Encabezado -->
+    <div class="text-center space-y-2">
+      <!-- Título con fondo azul claro específico -->
+      <div class="inline-block bg-blue-100 px-6 py-3 rounded-xl shadow-sm">
+        <h1 class="text-3xl font-extrabold text-blue-900 flex items-center justify-center gap-3">
+          
+          Analizador de Complejidad Algorítmica
+        </h1>
+      </div>
+      <p class="mt-2 text-sm text-slate-500">
+        Ingresa tu pseudocódigo y obtén su complejidad temporal en notación Big O, Θ y Ω.
+    </div>
+
+    <!-- Tarjeta de Entrada -->
+    <div class="bg-white shadow-xl rounded-2xl overflow-hidden border border-blue-100">
+      <div class="p-8">
+        
+        <!-- Área de Pseudocódigo -->
+        <div class="mb-6">
+          <label for="code-input" class="block text-lg font-bold text-blue-900 mb-3">
+            Pseudocódigo:
+          </label>
+          <div class="relative">
+            <textarea 
+              id="code-input"
+              [(ngModel)]="inputCode" 
+              rows="12" 
+              class="block w-full rounded-xl border-2 border-blue-200 bg-slate-50 p-4 font-mono text-sm text-slate-700 focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 transition duration-200 ease-in-out resize-y shadow-inner"
+              placeholder="Escribe tu algoritmo aquí..."></textarea>
+            
+            <!-- Pequeña decoración o hint -->
+            <div class="absolute bottom-3 right-3 text-xs text-blue-400 pointer-events-none">
+              
+            </div>
+          </div>
+        </div>
+
+        <!-- Botón de Acción -->
+        <button 
+          (click)="onAnalyze()" 
+          [disabled]="isLoading"
+          class="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold py-4 px-6 rounded-xl shadow-lg transform transition hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2">
+          <span *ngIf="isLoading" class="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></span>
+          {{ isLoading ? 'Analizando Algoritmo...' : 'Calcular Eficiencia' }}
+        </button>
+
+        <!-- Mensaje de Error -->
+        <div *ngIf="errorMsg" class="mt-4 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-r">
+          <p class="font-bold">Error</p>
+          <p>{{ errorMsg }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección de Resultados (Aparece solo si hay resultado) -->
+    <div *ngIf="result" class="animate-fade-in-up space-y-6">
+      <h2 class="text-2xl font-bold text-blue-900 text-center border-b-2 border-blue-100 pb-2">
+        Resultados del Análisis
+      </h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Tarjeta Peor Caso -->
+        <div class="bg-white p-6 rounded-xl shadow-md border-t-4 border-red-500 flex flex-col items-center text-center hover:shadow-lg transition">
+          <div class="text-xs font-bold tracking-wider text-red-500 uppercase mb-1">Peor Caso (O)</div>
+          <div class="text-4xl font-extrabold text-slate-800 my-2">{{ result.big_o }}</div>
+          <div class="text-xs text-slate-400">Upper Bound</div>
+        </div>
+
+        <!-- Tarjeta Caso Promedio -->
+        <div class="bg-white p-6 rounded-xl shadow-md border-t-4 border-blue-500 flex flex-col items-center text-center hover:shadow-lg transition transform scale-105 z-10">
+          <div class="text-xs font-bold tracking-wider text-blue-500 uppercase mb-1">Caso Promedio (Θ)</div>
+          <div class="text-4xl font-extrabold text-slate-800 my-2">{{ result.theta || '?' }}</div>
+          <div class="text-xs text-slate-400">Tight Bound</div>
+        </div>
+
+        <!-- Tarjeta Mejor Caso -->
+        <div class="bg-white p-6 rounded-xl shadow-md border-t-4 border-green-500 flex flex-col items-center text-center hover:shadow-lg transition">
+          <div class="text-xs font-bold tracking-wider text-green-600 uppercase mb-1">Mejor Caso (Ω)</div>
+          <div class="text-4xl font-extrabold text-slate-800 my-2">{{ result.big_omega || '?' }}</div>
+          <div class="text-xs text-slate-400">Lower Bound</div>
+        </div>
+      </div>
+
+      <!-- Detalles Técnicos (Colapsable) -->
+      <div class="bg-blue-50 rounded-xl border border-blue-200 overflow-hidden">
+        <details class="group">
+          <summary class="flex justify-between items-center font-medium cursor-pointer list-none p-4 text-blue-800 hover:bg-blue-100 transition">
+            <span>Ver Representación Matemática (IR)</span>
+            <span class="transition group-open:rotate-180">
+              <svg fill="none" height="24" shape-rendering="geometricPrecision" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
+            </span>
+          </summary>
+          <div class="text-slate-600 p-4 border-t border-blue-200 bg-white font-mono text-xs overflow-auto max-h-60">
+            <pre>{{ result.ir | json }}</pre>
+          </div>
+        </details>
+      </div>
+    </div>
+
+  </div>
+</div>
