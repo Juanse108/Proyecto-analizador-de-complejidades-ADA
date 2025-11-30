@@ -1,5 +1,5 @@
 """
-Esquemas Pydantic utilizados por la capa de API del microservicio LLM.
+Esquemas Pydantic utilizados por la capa de api del microservicio LLM.
 
 Agrupa los modelos de entrada/salida de los distintos endpoints:
 

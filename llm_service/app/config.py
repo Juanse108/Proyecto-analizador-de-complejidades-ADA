@@ -34,7 +34,7 @@ class Settings(BaseSettings):
         GEMINI_MODEL:
             Modelo principal de la familia Gemini 2.0 a utilizar.
         GEMINI_API_KEY:
-            API key para autenticar contra la API de Google Gemini.
+            api key para autenticar contra la api de Google Gemini.
         GEMINI_TIMEOUT:
             Timeout (en segundos) para las llamadas al modelo.
         LLM_RETRY_MAX:

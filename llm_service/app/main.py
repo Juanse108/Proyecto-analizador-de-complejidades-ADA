@@ -19,7 +19,7 @@ def create_app() -> FastAPI:
     """
     Crea y configura la aplicación FastAPI.
 
-    - Asigna nombre y versión de la API.
+    - Asigna nombre y versión de la api.
     - Registra los routers de salud y del servicio LLM.
 
     Returns:
