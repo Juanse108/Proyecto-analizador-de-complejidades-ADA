@@ -571,7 +571,7 @@ class GeminiProvider:
     - Usa una cadena de modelos de la familia `gemini-2.0-*` definida en
       variables de entorno (modelo principal + fallbacks).
     - Implementa reintentos exponenciales ante errores 429 / 5xx / UNAVAILABLE.
-    - Si no hay API key configurada, retorna un pseudocódigo mínimo con
+    - Si no hay api key configurada, retorna un pseudocódigo mínimo con
       `begin/end` envolviendo el texto original.
 
     Los métodos `recurrence`, `classify` y `compare` están declarados pero
