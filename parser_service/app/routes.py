@@ -14,11 +14,12 @@ Se implementa usando **FastAPI** y expone dos endpoints principales:
 from fastapi import FastAPI
 from lark.exceptions import LarkError
 
-# Importaciones internas del microservicio
+# Importaciones internas del microservicio (relative imports)
 from .parser import parse_to_ast
 from .semantic_pass import run_semantic
 from .schemas import ParseReq, ParseResp, SemReq, SemResp, Issue as IssueSchema
 from .ast_models import Program
+
 
 # ---------------------------------------------------------------------------
 # INSTANCIA DE LA APLICACIÓN FASTAPI

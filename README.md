@@ -1,24 +1,51 @@
 
 
-# Analizador de Complejidades (Microservicios · Python · FastAPI)
+# Analizador de Complejidades Algorítmicas
 
-Sistema en **microservicios** para analizar el orden de complejidad de algoritmos escritos en **pseudocódigo**.
-MVP iterativo: soporta `assign`, `seq`, `if`, `for` (canónico) y `while` (patrones simples).
-Incluye **parser con Lark**, **analyzer determinista** con IR algebraico y **orquestador**.
+(Microservicios · Pseudocódigo · Lark · FastAPI · LLM)
 
+Sistema en microservicios para transformar lenguaje natural → pseudocódigo válido → AST → complejidad asintótica.
+Incluye:
 
+Parser formal con gramática Lark
+
+Semantic normalizer
+
+Analyzer determinista basado en IR algebraico
+
+Microservicio LLM para generación y apoyo algorítmico
+
+Orchestrator que une todos los servicios
+
+Soporte para complejidad O, Ω, Θ, recursiones y análisis estructurado
 
 
 ## Arquitectura
 
 ```
-[ Client ]
-    |
-    v
-[ Orchestrator (8000) ]  --->  [ Parser Service (8001) ]
-           |                              |
-           v                              v
-     [ Analyzer Service (8002) ]   <---  AST
+┌────────────────────┐
+│      CLIENTE       │
+└─────────┬──────────┘
+          │  /analyze (texto o pseudocódigo)
+          ▼
+┌────────────────────┐
+│   ORCHESTRATOR     │ 8000
+│ (API principal)    │
+└──┬───────────┬────┘
+   │           │
+   │ /parse    │ /generate
+   ▼           ▼
+┌──────────────────┐      ┌────────────────────┐
+│  PARSER SERVICE  │8001  │     LLM SERVICE    │8003
+│  (Lark + AST)    │      │(Gemini / to-grammar│
+└──┬───────────────┘      └─────────┬──────────┘
+   │ /analyze-ast                 │ /recurrence
+   ▼                              │ /classify
+┌────────────────────┐            │ /compare
+│   ANALYZER SERVICE │8002        │
+│ (IR + complejidad) │◄───────────┘
+└────────────────────┘
+
 ```
 
 * **Orchestrator**: API pública `/analyze`. Orquesta: parsea → valida semántica → analiza.
@@ -72,6 +99,7 @@ docker compose up --build
  - Orchestrator: http://localhost:8000/docs
  - Parser:       http://localhost:8001/docs
  - Analyzer:     http://localhost:8002/docs
+ - LLM(Gemini):  http://localhost:8003/docs
 
 
 

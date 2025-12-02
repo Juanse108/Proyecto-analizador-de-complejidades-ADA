@@ -184,7 +184,7 @@ def _visit_stmt(s: Stmt, issues: List[Issue]) -> Stmt:
 
 
 # ---------------------------------------------------------------------------
-# 5️. API PRINCIPAL
+# 5️. api PRINCIPAL
 # ---------------------------------------------------------------------------
 
 def run_semantic(ast: Program) -> Tuple[Program, List[Issue]]:
