@@ -1,16 +1,17 @@
 import { TestBed } from '@angular/core/testing';
 
-import { Analyzer } from './analyzer';
+import { AnalyzerService } from './analyzer';
 
 describe('Analyzer', () => {
-  let service: Analyzer;
+  let service: AnalyzerService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({});
-    service = TestBed.inject(Analyzer);
+    service = TestBed.inject(AnalyzerService);
   });
 
   it('should be created', () => {
     expect(service).toBeTruthy();
   });
 });
+ 

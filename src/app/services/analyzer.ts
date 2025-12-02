@@ -7,15 +7,14 @@ import { AnalyzeRequest, AnalyzeResponse } from '../models/analysis.model';
   providedIn: 'root'
 })
 export class AnalyzerService {
-  // Asegúrate de que este puerto coincida con tu Orchestrator Service en docker-compose
-  private apiUrl = 'http://localhost:8003/analyze'; 
+  private apiUrl = 'http://localhost:8000/analyze'; // Puerto del orchestrator
 
   constructor(private http: HttpClient) { }
 
-  analyzeCode(code: string): Observable<AnalyzeResponse> {
+  analyzeCode(code: string, objective: 'worst' | 'best' | 'avg' = 'worst'): Observable<AnalyzeResponse> {
     const payload: AnalyzeRequest = {
       code: code,
-      objective: 'worst' // Por defecto
+      objective: objective
     };
     return this.http.post<AnalyzeResponse>(this.apiUrl, payload);
   }
