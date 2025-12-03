@@ -46,23 +46,33 @@ class LLMClient:
         self.timeout = timeout
     
     async def validate_grammar(self, pseudocode: str) -> dict:
-        """Valida y corrige pseudocódigo según la gramática."""
+        """
+        Valida y corrige pseudocódigo según la gramática.
+        
+        Endpoint: POST /llm/validate-grammar
+        Request: {pseudocode: "..."} 
+        Response: {corrected_pseudocode: "...", is_valid: bool, issues: [...]}
+        """
         payload = {"pseudocode": pseudocode}
         
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
+                print(f"📤 LLM validate-grammar: {self.base_url}/llm/validate-grammar")
                 response = await client.post(
                     f"{self.base_url}/llm/validate-grammar", 
                     json=payload
                 )
                 response.raise_for_status()
-                return response.json()
+                result = response.json()
+                print(f"✅ LLM validation OK")
+                return result
             except httpx.HTTPStatusError as e:
-                print(f"⚠️ LLM validation error ({e.response.status_code}): {e.response.text}")
+                error_text = e.response.text
+                print(f"⚠️ LLM validation error ({e.response.status_code}): {error_text}")
                 return {
                     "corrected_pseudocode": pseudocode,
                     "is_valid": False,
-                    "issues": [f"LLM error: {e.response.text}"]
+                    "issues": [f"LLM error: {error_text}"]
                 }
             except Exception as e:
                 print(f"⚠️ LLM connection error: {str(e)}")
@@ -96,19 +106,22 @@ async def _call_service(url: str, endpoint: str, payload: dict, error_msg: str) 
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             print(f"📤 POST {full_url}")
+            print(f"   Payload: {str(payload)[:100]}...")
             response = await client.post(full_url, json=payload)
             response.raise_for_status()
             result = response.json()
             print(f"✅ {error_msg}: OK")
             return result
         except httpx.HTTPStatusError as e:
+            error_detail = e.response.text
             print(f"❌ {error_msg} error ({e.response.status_code})")
+            print(f"   Response: {error_detail[:200]}")
             raise HTTPException(
                 status_code=500, 
-                detail=f"{error_msg}: {e.response.text[:200]}"
+                detail=f"{error_msg}: {error_detail[:200]}"
             )
         except asyncio.TimeoutError:
-            print(f"❌ {error_msg}: Timeout")
+            print(f"❌ {error_msg}: Timeout (60s)")
             raise HTTPException(
                 status_code=503, 
                 detail=f"Timeout en {error_msg}"
@@ -144,9 +157,9 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     Raises:
         HTTPException: Si algún paso del pipeline falla
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print(f"🚀 INICIANDO ANÁLISIS DE COMPLEJIDAD")
-    print(f"{'='*60}")
+    print(f"{'='*70}")
     print(f"Objetivo: {req.objective}")
     print(f"Código:\n{req.code[:100]}...")
     
@@ -162,7 +175,7 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         is_valid = validation_res.get("is_valid", False)
         issues = validation_res.get("issues", [])
         
-        correction_notes = issues
+        correction_notes = issues if issues else []
         
         if not is_valid and corrected_code != normalized_code:
             print(f"   ⚠️ CÓDIGO CORREGIDO POR LLM ({len(issues)} correcciones)")
@@ -174,7 +187,7 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
             
     except Exception as e:
         print(f"   ⚠️ Error en validación LLM (continuando): {str(e)}")
-        correction_notes.append(f"LLM validation skipped: {str(e)}")
+        correction_notes.append(f"LLM validation warning: {str(e)}")
 
     # --- PASO 2: PARSING SINTÁCTICO ---
     print(f"\n[2/4] 📝 PARSEANDO PSEUDOCÓDIGO...")
@@ -186,37 +199,49 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         if not parse_resp.ok:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Parse error: {parse_resp.errors}"
+                detail=f"Parse error: {', '.join(parse_resp.errors)}"
             )
         
         print(f"   ✅ PARSING EXITOSO - AST generado")
         ast_raw = parse_resp.ast
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"   ❌ Error de parseo: {str(e)}")
-        raise
+        raise HTTPException(status_code=500, detail=f"Parser error: {str(e)}")
 
     # --- PASO 3: ANÁLISIS SEMÁNTICO ---
     print(f"\n[3/4] 🔎 ANÁLISIS SEMÁNTICO...")
     try:
         sem_req = SemReq(ast=ast_raw)
-        sem_res = await _call_service(PARSER_URL, "/semantic", sem_req.model_dump(), "Semantic Analysis")
+        sem_res = await _call_service(
+            PARSER_URL, 
+            "/semantic", 
+            sem_req.model_dump(), 
+            "Semantic Analysis"
+        )
         
         ast_sem = sem_res.get("ast_sem")
         if not ast_sem:
-            raise HTTPException(status_code=500, detail="No semantic AST returned")
+            raise HTTPException(
+                status_code=500, 
+                detail="No semantic AST returned from parser"
+            )
         
         print(f"   ✅ ANÁLISIS SEMÁNTICO COMPLETADO")
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"   ❌ Error semántico: {str(e)}")
-        raise
+        raise HTTPException(status_code=500, detail=f"Semantic error: {str(e)}")
 
     # --- PASO 4: ANÁLISIS DE COMPLEJIDAD ---
     print(f"\n[4/4] 📊 ANÁLISIS DE COMPLEJIDAD...")
     try:
         analysis_req = AnalyzeAstReq(
-            ast_sem=ast_sem, 
+            ast=ast_sem,
             objective=req.objective,
             cost_model=None
         )
@@ -233,15 +258,26 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         print(f"      Ω(n):  {analysis_result.big_omega}")
         print(f"      Θ(n):  {analysis_result.theta}")
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"   ❌ Error de complejidad: {str(e)}")
-        raise
+        raise HTTPException(status_code=500, detail=f"Complexity analysis error: {str(e)}")
 
     # --- RESPUESTA FINAL ---
     print(f"\n✅ ANÁLISIS COMPLETADO EXITOSAMENTE")
-    print(f"{'='*60}\n")
+    print(f"{'='*70}\n")
     
-    all_notes = [*correction_notes, *(analysis_result.notes or [])]
+    all_notes = []
+    if correction_notes:
+        all_notes.extend(correction_notes)
+    
+    # ✅ Convertir notes a lista si es string
+    if analysis_result.notes:
+        if isinstance(analysis_result.notes, str):
+            all_notes.append(analysis_result.notes)
+        else:
+            all_notes.extend(analysis_result.notes)
     
     return OrchestratorResponse(
         normalized_code=normalized_code,

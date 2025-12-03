@@ -82,7 +82,7 @@ EJEMPLO VÁLIDO:
   providedIn: 'root'
 })
 export class GeminiService {
-  private apiKey = 'AIzaSyAHecVUUB9dgXHlxqdQeKLB5yk8UVndIuM';
+  private apiKey = 'AIzaSyAsc2BGa9puyXPdDZs6ss94Vbo7zs2Sykg';
   private model = 'gemini-2.0-flash';
   private apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
 

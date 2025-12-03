@@ -34,6 +34,8 @@ export class OrchestratorService {
       objective: objective
     };
 
+    console.log('📤 Enviando al Orchestrator:', payload);
+
     return this.http.post<AnalyzeResponse>(`${this.apiUrl}/analyze`, payload).pipe(
       catchError(this.handleError)
     );
@@ -59,10 +61,16 @@ export class OrchestratorService {
       errorMessage = `Error: ${error.error.message}`;
     } else {
       // Error del servidor
-      errorMessage = error.error?.detail || `Error ${error.status}: ${error.statusText}`;
+      if (error.error?.detail) {
+        errorMessage = error.error.detail;
+      } else if (error.error?.message) {
+        errorMessage = error.error.message;
+      } else {
+        errorMessage = `Error ${error.status}: ${error.statusText}`;
+      }
     }
 
-    console.error('Error en Orchestrator Service:', errorMessage);
+    console.error('❌ Error en Orchestrator Service:', errorMessage);
     return throwError(() => new Error(errorMessage));
   }
 }

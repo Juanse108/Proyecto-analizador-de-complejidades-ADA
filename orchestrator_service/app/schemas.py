@@ -6,8 +6,8 @@ entre el Orchestrator y los microservicios, así como las estructuras
 públicas para el cliente (Frontend).
 """
 
-from pydantic import BaseModel, Field
-from typing import Any, List, Optional, Dict
+from pydantic import BaseModel, Field, field_validator
+from typing import Any, List, Optional, Dict, Union
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ class SemReq(BaseModel):
 # Estructura de request para el servicio Analyzer /analyze-ast
 class AnalyzeAstReq(BaseModel):
     """Petición de análisis de complejidad al Analyzer."""
-    ast_sem: Dict[str, Any] = Field(..., description="AST semánticamente validado.")
+    ast: Dict[str, Any] = Field(..., description="AST semánticamente validado.")
     objective: str = Field(
         "worst", 
         description="Objetivo de análisis: 'worst', 'best' o 'average'."
@@ -60,14 +60,26 @@ class AnalyzerResult(BaseModel):
         None, 
         description="Notación Θ (Cota Ajustada - Caso Promedio)."
     )
-    ir: Optional[Dict[str, Any]] = Field(
+    ir: Optional[Union[str, Dict[str, Any]]] = Field(
         None, 
         description="Representación Intermedia (IR) usada para el cálculo."
     )
-    notes: Optional[List[str]] = Field(
+    notes: Optional[Union[List[str], str]] = Field(
         None, 
         description="Notas o explicaciones del análisis."
     )
+
+    @field_validator('notes', mode='before')
+    @classmethod
+    def convert_notes_to_list(cls, v):
+        """Convierte notes a lista si llega como string."""
+        if isinstance(v, str):
+            return [v]  # Convertir string a lista
+        elif isinstance(v, list):
+            return v
+        elif v is None:
+            return None
+        return v
 
 
 # ---------------------------------------------------------------------------
