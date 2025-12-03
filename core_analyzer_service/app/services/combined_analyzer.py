@@ -110,6 +110,9 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
         # LineCostInternal -> LineCost (modelo Pydantic)
         public_lines = serialize_line_costs(result.lines)
 
+        # Método usado: para parte iterativa
+        method_used = getattr(result, "method_used", "iteration")
+
         return analyzeAstResp(
             algorithm_kind="iterative",
             big_o=big_o,
@@ -121,6 +124,7 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
             ir_avg=to_json(result.avg) if result.avg else None,
             lines=public_lines,
             notes=f"Análisis iterativo. Objetivo: {req.objective}.",
+            method_used=method_used,
         )
 
     # ---------------------------------------------------------------
@@ -151,6 +155,9 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
                     f"Teorema Maestro caso {rec_result.master_theorem_case}"
                 )
 
+        # Método usado viene del analizador recursivo
+        method_used = getattr(rec_result, "method_used", None)
+
         return analyzeAstResp(
             algorithm_kind="recursive",
             big_o=big_o,
@@ -162,11 +169,9 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
             ir_avg=to_json(rec_result.theta) if rec_result.theta else None,
             lines=None,
             notes=" | ".join(notes),
+            method_used=method_used,
         )
 
-    # ---------------------------------------------------------------
-    # CASO MIXTO (por ahora sin soporte)
-    # ---------------------------------------------------------------
     # ---------------------------------------------------------------
     # CASO MIXTO (iterativo + recursivo)
     # ---------------------------------------------------------------
@@ -192,10 +197,14 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
         strong_bounds = _generate_strong_bounds(total_worst_expr, name="T(n)")
 
         notes = ["Análisis mixto (iterativo + recursivo)."]
-        notes.append(f"Parte iterativa: peor {big_o_str_from_expr(iter_result.worst)}, "
-                     f"mejor {big_omega_str_from_expr(iter_result.best)}.")
-        notes.append(f"Parte recursiva: peor {big_o_str_from_expr(rec_result.big_o)}, "
-                     f"mejor {big_omega_str_from_expr(rec_result.big_omega)}.")
+        notes.append(
+            f"Parte iterativa: peor {big_o_str_from_expr(iter_result.worst)}, "
+            f"mejor {big_omega_str_from_expr(iter_result.best)}."
+        )
+        notes.append(
+            f"Parte recursiva: peor {big_o_str_from_expr(rec_result.big_o)}, "
+            f"mejor {big_omega_str_from_expr(rec_result.big_omega)}."
+        )
 
         if rec_result.recurrence:
             rec: RecurrenceRelation = rec_result.recurrence
@@ -212,6 +221,14 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
         # que es donde tenemos breakdown línea por línea.
         public_lines = serialize_line_costs(iter_result.lines)
 
+        # Combinar métodos usados, si existen
+        iter_method = getattr(iter_result, "method_used", "iteration")
+        rec_method = getattr(rec_result, "method_used", None)
+        if rec_method:
+            method_used = f"mixed({iter_method} + {rec_method})"
+        else:
+            method_used = f"mixed({iter_method} + recursive_core)"
+
         return analyzeAstResp(
             algorithm_kind="mixed",
             big_o=big_o,
@@ -223,5 +240,6 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
             ir_avg=None,  # si no estás calculando caso promedio
             lines=public_lines,
             notes=" | ".join(notes),
+            method_used=method_used,
         )
 

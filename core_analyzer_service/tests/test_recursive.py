@@ -1,6 +1,6 @@
 # core_analyzer_service/tests/test_recursive_complete.py
 """
-Suite COMPLETA de pruebas recursivas - 13 casos
+Suite COMPLETA de pruebas recursivas - 15 casos
 ===============================================
 
 NOTA:
@@ -373,6 +373,53 @@ RECURSIVE_TEST_SUITE: List[Dict[str, Any]] = [
         "method": "linear_recurrence",
         "category": "exponential",
     },
+
+    # ============================================================
+    # GRUPO 6: CASOS ADICIONALES (ECUACIÓN CARACTERÍSTICA + ITERACIÓN)
+    # ============================================================
+    {
+        "name": "Recurrencia lineal simple (T(n) = T(n-1) + 1)",
+        "pseudocode": (
+            "LINEAR_INCREMENTAL(n)\n"
+            "begin\n"
+            "  if (n <= 0) then\n"
+            "  begin\n"
+            "    return 0\n"
+            "  end else\n"
+            "  begin\n"
+            "    return 1 + LINEAR_INCREMENTAL(n - 1)\n"
+            "  end\n"
+            "end"
+        ),
+        # T(n) = T(n-1) + O(1)  ->  Θ(n)
+        "expected": {"big_o": "n", "big_omega": "n", "theta": "n"},
+        "recurrence": "T(n) = T(n-1) + O(1)",
+        "method": "characteristic_equation + iteration",
+        "category": "linear",
+        "notes": "Ejemplo explícito para probar ecuación característica de primer orden + desenrollado.",
+    },
+
+    {
+        "name": "Recurrencia lineal exponencial (T(n) = 2T(n-1) + 1)",
+        "pseudocode": (
+            "DOUBLE_RECURSION(n)\n"
+            "begin\n"
+            "  if (n <= 0) then\n"
+            "  begin\n"
+            "    return 1\n"
+            "  end else\n"
+            "  begin\n"
+            "    return DOUBLE_RECURSION(n - 1) + DOUBLE_RECURSION(n - 1)\n"
+            "  end\n"
+            "end"
+        ),
+        # T(n) = 2T(n-1) + O(1)  ->  Θ(2^n)
+        "expected": {"big_o": "2^n", "big_omega": "2^n", "theta": "2^n"},
+        "recurrence": "T(n) = 2T(n-1) + O(1)",
+        "method": "characteristic_equation + iteration",
+        "category": "exponential",
+        "notes": "Caso explícito donde la ecuación característica r = 2 domina y la solución es Θ(2^n).",
+    },
 ]
 
 
@@ -432,6 +479,13 @@ def run_test(test_case: Dict[str, Any], verbose: bool = False) -> Dict[str, Any]
         omega_ok = analysis["big_omega"] == expected.get("big_omega")
         matches = o_ok and omega_ok
 
+        # Intentamos detectar qué método usó el analizador
+        method_used = analysis.get("method_used")
+        if method_used is None:
+            recursive_part = analysis.get("recursive")
+            if isinstance(recursive_part, dict):
+                method_used = recursive_part.get("method_used")
+
         result = {
             "name": name,
             "category": category,
@@ -442,6 +496,7 @@ def run_test(test_case: Dict[str, Any], verbose: bool = False) -> Dict[str, Any]
                 "big_omega": analysis["big_omega"],
                 "theta": analysis.get("theta"),
             },
+            "method_used": method_used,
         }
 
         if verbose:
@@ -449,6 +504,9 @@ def run_test(test_case: Dict[str, Any], verbose: bool = False) -> Dict[str, Any]
             print(f"   Big-O: {analysis['big_o']}")
             print(f"   Big-Ω: {analysis['big_omega']}")
             print(f"   Θ: {analysis.get('theta')}")
+            if method_used:
+                print(f"   Método usado (analizador): {method_used}")
+
             print("\n🎯 Esperado:")
             print(f"   Big-O: {expected.get('big_o')}")
             print(f"   Big-Ω: {expected.get('big_omega')}")
@@ -482,7 +540,7 @@ def run_test(test_case: Dict[str, Any], verbose: bool = False) -> Dict[str, Any]
 # ============================================================================
 
 def main():
-    print("\n🔄 SUITE COMPLETA: ALGORITMOS RECURSIVOS (13 CASOS)")
+    print("\n🔄 SUITE COMPLETA: ALGORITMOS RECURSIVOS (15 CASOS)")
     print("=" * 70)
     print(f"Total de casos: {len(RECURSIVE_TEST_SUITE)}\n")
 
@@ -498,10 +556,13 @@ def main():
         cat = result["category"]
         by_category.setdefault(cat, []).append(result)
 
+        method_used = result.get("method_used")
+        method_suffix = f" [{method_used}]" if method_used else ""
+
         if result["status"] == "success":
-            print("✅")
+            print(f"✅{method_suffix}")
         else:
-            print(f"❌ ({result['status']})")
+            print(f"❌ ({result['status']}){method_suffix}")
 
     # Resumen por categoría
     print("\n" + "=" * 70)
@@ -525,6 +586,9 @@ def main():
                 act = test["actual"]
                 print(f"      Esperado: O({exp.get('big_o')}), Ω({exp.get('big_omega')})")
                 print(f"      Obtenido: O({act.get('big_o')}), Ω({act.get('big_omega')})")
+            method_used = test.get("method_used")
+            if method_used:
+                print(f"      Método usado: {method_used}")
 
     # Resumen global
     print("\n" + "=" * 70)
