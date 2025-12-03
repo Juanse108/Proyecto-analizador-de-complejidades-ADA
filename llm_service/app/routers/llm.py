@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from ..schemas import (
     ToGrammarRequest, ToGrammarResponse,
@@ -34,9 +34,12 @@ async def to_grammar(payload: ToGrammarRequest):
 
 @router.post("/validate-grammar", response_model=ValidateGrammarResponse)
 async def validate_grammar(payload: ValidateGrammarRequest):
-    """Valida y corrige pseudocódigo existente."""
-    result = await provider().validate_grammar(payload.pseudocode)
-    return ValidateGrammarResponse(**result)
+    """Valida y corrige pseudocódigo."""
+    try:
+        result = await provider().validate_grammar(payload.pseudocode)
+        return ValidateGrammarResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/recurrence", response_model=RecurrenceResponse)
@@ -52,3 +55,8 @@ async def classify(payload: ClassifyRequest):
 @router.post("/compare", response_model=CompareResponse)
 async def compare(payload: CompareRequest):
     return await provider().compare(payload)
+
+
+@router.get("/health")
+async def health():
+    return {"status": "ok", "service": "llm"}

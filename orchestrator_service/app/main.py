@@ -1,40 +1,95 @@
-from pydantic import BaseModel, Field
-from typing import Any, List, Optional, Dict
+"""
+Punto de entrada principal del Orchestrator Service.
 
-# --- Estructuras para la COMUNICACIÓN INTERNA ---
+Orquestador del pipeline completo de análisis de complejidad:
+1. Normalización de pseudocódigo con LLM
+2. Validación y corrección de gramática con LLM
+3. Parsing sintáctico
+4. Análisis semántico
+5. Análisis de complejidad algorítmica
 
-# Estructura de respuesta del servicio Parser /parse
-class ParseResp(BaseModel):
-    ok: bool = Field(..., description="Indica si el parseo sintáctico fue exitoso.")
-    ast: Optional[Dict[str, Any]] = Field(None, description="Árbol de Sintaxis Abstracta (AST) si el parseo fue exitoso.")
-    errors: List[str] = Field(default_factory=list, description="Lista de errores de sintaxis.")
+La lógica principal se encuentra en `logic.py`.
+"""
 
-# Estructura de request para el servicio Parser /semantic
-class SemReq(BaseModel):
-    ast: Dict[str, Any] = Field(..., description="AST del código a analizar.")
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+import os
 
-# Estructura de request para el servicio Analyzer /analyze-ast
-class AnalyzeAstReq(BaseModel):
-    ast_sem: Dict[str, Any] = Field(..., description="AST semánticamente validado.")
-    objective: str = Field("worst", description="Objetivo de análisis (e.g., 'worst', 'best', 'average').")
-    cost_model: Optional[str] = Field(None, description="Modelo de costo opcional.")
+from .logic import router
+from .schemas import (
+    AnalyzeRequest,
+    OrchestratorResponse,
+    ParseResp,
+    SemReq,
+    AnalyzeAstReq,
+    AnalyzerResult
+)
 
-# Estructura de respuesta del servicio Analyzer /analyze-ast
-class AnalyzerResult(BaseModel):
-    big_o: str = Field(..., description="Notación O (Peor Caso).")
-    big_omega: Optional[str] = Field(None, description="Notación Omega (Mejor Caso).")
-    theta: Optional[str] = Field(None, description="Notación Theta (Caso Promedio).")
-    ir: Optional[Dict[str, Any]] = Field(None, description="Representación Intermedia (IR) usada para el cálculo.")
-    notes: Optional[str] = Field(None, description="Notas o explicaciones del análisis.")
 
-# --- Estructuras para el ENDPOINT PÚBLICO del Orchestrator ---
+def create_app() -> FastAPI:
+    """
+    Crea y configura la aplicación FastAPI del Orchestrator.
 
-# Petición de entrada al Orchestrator
-class AnalyzeRequest(BaseModel):
-    code: str = Field(..., description="Pseudocódigo o Lenguaje Natural a analizar.")
-    objective: str = Field("worst", description="Objetivo de análisis (e.g., 'worst', 'best', 'average').")
+    - Configura CORS para permitir peticiones desde el frontend.
+    - Registra las rutas del orchestrador.
+    - Imprime configuración de los microservicios.
 
-# Respuesta final que el Orchestrator envía al Frontend
-class OrchestratorResponse(AnalyzerResult):
-    normalized_code: str = Field(..., description="El código final, corregido por el LLM, que fue enviado al parser.")
-    # El resto de campos son heredados de AnalyzerResult
+    Returns:
+        Instancia configurada de `FastAPI`.
+    """
+    app = FastAPI(
+        title="Orchestrator Service",
+        description="Orquestador del pipeline de análisis de complejidad algorítmica",
+        version="1.0.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json"
+    )
+
+    # --- CORS Configuration ---
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # En producción, especificar orígenes
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # --- Rutas del Orchestrador ---
+    app.include_router(router, tags=["analysis"])
+
+    # --- Configuración de microservicios ---
+    llm_url = os.getenv("LLM_URL", "http://localhost:8003")
+    parser_url = os.getenv("PARSER_URL", "http://localhost:8001")
+    analyzer_url = os.getenv("ANALYZER_URL", "http://localhost:8002")
+
+    print(f"""
+╔════════════════════════════════════════════════════════════╗
+║         ORCHESTRATOR SERVICE INITIALIZED                   ║
+╠════════════════════════════════════════════════════════════╣
+║ Service:      Orchestrator                                 ║
+║ Version:      1.0.0                                        ║
+║ Docs:         http://localhost:8000/docs                   ║
+╠════════════════════════════════════════════════════════════╣
+║ Microservicios:                                            ║
+║ LLM_URL:      {llm_url:<43}║
+║ PARSER_URL:   {parser_url:<43}║
+║ ANALYZER_URL: {analyzer_url:<43}║
+╚════════════════════════════════════════════════════════════╝
+    """)
+
+    return app
+
+
+# Instancia por defecto utilizada por Uvicorn
+app = create_app()
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

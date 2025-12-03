@@ -1,8 +1,8 @@
 import os
 import httpx
-from typing import Dict
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from typing import Dict, List
+from fastapi import APIRouter, HTTPException
+import asyncio
 
 # Importaciones de esquemas internos
 from .schemas import (
@@ -15,29 +15,24 @@ from .schemas import (
 )
 
 # ---------------------------------------------------------------------------
-# CONFIGURACIÓN Y CONSTANTES
+# CONFIGURACIÓN
 # ---------------------------------------------------------------------------
 
-LLM_URL = os.getenv("LLM_URL", "http://llm:8003")
-PARSER_URL = os.getenv("PARSER_URL", "http://parser:8001")
-ANALYZER_URL = os.getenv("ANALYZER_URL", "http://analyzer:8002")
+LLM_URL = os.getenv("LLM_URL", "http://localhost:8003")
+PARSER_URL = os.getenv("PARSER_URL", "http://localhost:8001")
+ANALYZER_URL = os.getenv("ANALYZER_URL", "http://localhost:8002")
 
-GRAMMAR_RULES = """
-// Reglas de sintaxis estricta para el pseudocódigo:
-// Asignación: variable <- expresion
-// Ciclo FOR: for variableContadora <- valorInicial to limite do begin ... end
-// Ciclo WHILE: while (condicion) do begin ... end
-// Condicional IF: if (condicion) then begin ... end else begin ... end
-// Subrutinas: nombre_subrutina(parametros) begin ... end
-// Llamada: CALL nombre_subrutina(parametros)
-// Valores Booleanos: T (true) y F (false).
-"""
+router = APIRouter()
 
-app = FastAPI(
-    title="Orchestrator Service", 
-    description="Encadena el pre-procesamiento LLM, parseo y análisis de complejidad.",
-    version="1.0.0"
-)
+print(f"""
+╔════════════════════════════════════════════════════════════╗
+║         ORCHESTRATOR LOGIC INITIALIZED                     ║
+╠════════════════════════════════════════════════════════════╣
+║ LLM_URL:      {LLM_URL:<43}║
+║ PARSER_URL:   {PARSER_URL:<43}║
+║ ANALYZER_URL: {ANALYZER_URL:<43}║
+╚════════════════════════════════════════════════════════════╝
+""")
 
 # ---------------------------------------------------------------------------
 # CLIENTE LLM
@@ -50,113 +45,118 @@ class LLMClient:
         self.base_url = base_url
         self.timeout = timeout
     
-    async def generate(self, user_prompt: str, system_instruction: str, temperature: float = 0.1) -> str:
-        """Llama al endpoint /generate del servicio LLM."""
-        payload = {
-            "user_prompt": user_prompt,
-            "system_instruction": system_instruction,
-            "temperature": temperature
-        }
+    async def validate_grammar(self, pseudocode: str) -> dict:
+        """Valida y corrige pseudocódigo según la gramática."""
+        payload = {"pseudocode": pseudocode}
         
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
-                response = await client.post(f"{self.base_url}/generate", json=payload)
+                response = await client.post(
+                    f"{self.base_url}/llm/validate-grammar", 
+                    json=payload
+                )
                 response.raise_for_status()
-                return response.json().get("text", "").strip()
+                return response.json()
             except httpx.HTTPStatusError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Error del servicio LLM ({e.response.status_code}): {e.response.text}"
-                )
+                print(f"⚠️ LLM validation error ({e.response.status_code}): {e.response.text}")
+                return {
+                    "corrected_pseudocode": pseudocode,
+                    "is_valid": False,
+                    "issues": [f"LLM error: {e.response.text}"]
+                }
             except Exception as e:
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Fallo de conexión con LLM en {self.base_url}: {str(e)}"
-                )
+                print(f"⚠️ LLM connection error: {str(e)}")
+                return {
+                    "corrected_pseudocode": pseudocode,
+                    "is_valid": False,
+                    "issues": [f"Connection error: {str(e)}"]
+                }
 
-# Instancia del cliente LLM
 llm_client = LLMClient(LLM_URL)
 
 # ---------------------------------------------------------------------------
 # FUNCIONES AUXILIARES
 # ---------------------------------------------------------------------------
 
-def _create_normalization_prompt(user_input: str) -> tuple:
-    """Crea el prompt del sistema y el prompt del usuario para normalización."""
-    
-    system_prompt = f"""
-Eres el Agente de Normalización de Pseudocódigo. Tu tarea es garantizar la calidad de entrada.
-
-1. Si la entrada es lenguaje natural (ej: 'haz un bubble sort'), tradúcela al Pseudocódigo más eficiente que cumpla con las Reglas de Gramática.
-2. Si es Pseudocódigo, revísalo y corrígelo sutilmente para que se ajuste PERFECTAMENTE a las Reglas de Gramática.
-3. NO incluyas explicaciones, texto introductorio, ni Markdown (```). Solo devuelve el código limpio y corregido/traducido.
-
-Reglas de Gramática OBLIGATORIAS:
-{GRAMMAR_RULES}
-"""
-    
-    return system_prompt, user_input
-
 async def _call_service(url: str, endpoint: str, payload: dict, error_msg: str) -> dict:
-    """Función genérica para llamar a microservicios con manejo de errores."""
+    """
+    Llamar a microservicios con manejo de errores.
+    
+    Args:
+        url: URL base del servicio
+        endpoint: Endpoint a llamar (ej: /parse)
+        payload: Datos JSON a enviar
+        error_msg: Mensaje de error descriptivo
+        
+    Returns:
+        Respuesta JSON del servicio
+    """
     full_url = f"{url}{endpoint}"
     
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
+            print(f"📤 POST {full_url}")
             response = await client.post(full_url, json=payload)
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            print(f"✅ {error_msg}: OK")
+            return result
         except httpx.HTTPStatusError as e:
+            print(f"❌ {error_msg} error ({e.response.status_code})")
             raise HTTPException(
                 status_code=500, 
-                detail=f"{error_msg} (Servicio {url} respondió con {e.response.status_code}): {e.response.text}"
+                detail=f"{error_msg}: {e.response.text[:200]}"
             )
-        except Exception as e:
+        except asyncio.TimeoutError:
+            print(f"❌ {error_msg}: Timeout")
             raise HTTPException(
                 status_code=503, 
-                detail=f"Fallo de conexión con {error_msg} en {full_url}: {str(e)}"
+                detail=f"Timeout en {error_msg}"
+            )
+        except Exception as e:
+            print(f"❌ {error_msg} error: {str(e)}")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Error de conexión: {str(e)}"
             )
 
-
 # ---------------------------------------------------------------------------
-# ENDPOINT PRINCIPAL: ANÁLISIS COMPLETO CON CORRECCIÓN LLM
+# ENDPOINT PRINCIPAL: ANÁLISIS COMPLETO
 # ---------------------------------------------------------------------------
 
-@app.post("/analyze", response_model=OrchestratorResponse)
+@router.post("/analyze", response_model=OrchestratorResponse)
 async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     """
-    Ejecuta el pipeline completo de análisis:
-    1. Normalización inicial (LLM - Agente de Gramática) - NUEVO
-    2. Validación y corrección de gramática (LLM) - NUEVO PASO CRÍTICO
-    3. Parseo Sintáctico (Parser Service).
-    4. Análisis Semántico (Parser Service).
-    5. Análisis de Complejidad (Analyzer Service).
+    Pipeline completo de análisis de complejidad algorítmica.
+    
+    Flujo:
+    1. ✅ Validación y corrección de gramática con LLM
+    2. ✅ Parsing sintáctico (Parser Service)
+    3. ✅ Análisis semántico (Parser Service)
+    4. ✅ Análisis de complejidad (Analyzer Service)
+    
+    Args:
+        req: AnalyzeRequest con pseudocódigo y objetivo
+        
+    Returns:
+        OrchestratorResponse con resultados completos
+        
+    Raises:
+        HTTPException: Si algún paso del pipeline falla
     """
+    print(f"\n{'='*60}")
+    print(f"🚀 INICIANDO ANÁLISIS DE COMPLEJIDAD")
+    print(f"{'='*60}")
+    print(f"Objetivo: {req.objective}")
+    print(f"Código:\n{req.code[:100]}...")
+    
     normalized_code = req.code
-    correction_notes: list = []
+    correction_notes: List[str] = []
 
-    # --- PASO 1: AGENTE DE NORMALIZACIÓN (LLM) ---
+    # --- PASO 1: VALIDACIÓN Y CORRECCIÓN DE GRAMÁTICA (LLM) ---
+    print(f"\n[1/4] 🔍 VALIDANDO Y CORRIGIENDO GRAMÁTICA CON LLM...")
     try:
-        system_prompt, user_prompt = _create_normalization_prompt(req.code)
-        normalized_code = await llm_client.generate(user_prompt, system_prompt, temperature=0.1)
-        print(f"✓ Código normalizado por LLM:\n{normalized_code}")
-    except HTTPException as e:
-        print(f"⚠ Advertencia: Fallo al llamar al Agente de Gramática. Usando código original. Error: {e.detail}")
-        normalized_code = req.code
-    except Exception as e:
-        print(f"⚠ Error inesperado en normalización: {str(e)}")
-        normalized_code = req.code
-
-    # --- PASO 1.5 (NUEVO): VALIDACIÓN Y CORRECCIÓN DE GRAMÁTICA (LLM) ---
-    print(f"🔍 Validando gramática del pseudocódigo con LLM...")
-    try:
-        validate_payload = {"pseudocode": normalized_code}
-        validation_res = await _call_service(
-            LLM_URL, 
-            "/llm/validate-grammar", 
-            validate_payload, 
-            "Validación de Gramática"
-        )
+        validation_res = await llm_client.validate_grammar(normalized_code)
         
         corrected_code = validation_res.get("corrected_pseudocode", normalized_code)
         is_valid = validation_res.get("is_valid", False)
@@ -164,69 +164,103 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         
         correction_notes = issues
         
-        if not is_valid:
-            print(f"⚠ Pseudocódigo corregido por LLM")
-            print(f"Correcciones realizadas: {issues}")
+        if not is_valid and corrected_code != normalized_code:
+            print(f"   ⚠️ CÓDIGO CORREGIDO POR LLM ({len(issues)} correcciones)")
+            for issue in issues[:3]:  # Mostrar primeras 3
+                print(f"      - {issue}")
             normalized_code = corrected_code
         else:
-            print(f"✓ Pseudocódigo válido según gramática")
+            print(f"   ✅ CÓDIGO VÁLIDO (sin correcciones necesarias)")
             
     except Exception as e:
-        print(f"⚠ Validación de gramática falló, continuando con código original: {str(e)}")
-        # Continuamos con el código que tenemos, aunque no haya sido validado
+        print(f"   ⚠️ Error en validación LLM (continuando): {str(e)}")
+        correction_notes.append(f"LLM validation skipped: {str(e)}")
 
-    # --- PASO 2: PARSEO SINTÁCTICO ---
-    print(f"📝 Parseando pseudocódigo...")
-    parse_payload = {"code": normalized_code}
-    parse_res = await _call_service(PARSER_URL, "/parse", parse_payload, "Parser Sintáctico")
-    
-    parse_resp = ParseResp.model_validate(parse_res)
-    if not parse_resp.ok:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Error de Sintaxis: {parse_resp.errors}\n" +
-                   f"Pseudocódigo que causó error:\n{normalized_code}"
-        )
+    # --- PASO 2: PARSING SINTÁCTICO ---
+    print(f"\n[2/4] 📝 PARSEANDO PSEUDOCÓDIGO...")
+    try:
+        parse_payload = {"code": normalized_code}
+        parse_res = await _call_service(PARSER_URL, "/parse", parse_payload, "Parser")
+        
+        parse_resp = ParseResp.model_validate(parse_res)
+        if not parse_resp.ok:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Parse error: {parse_resp.errors}"
+            )
+        
+        print(f"   ✅ PARSING EXITOSO - AST generado")
+        ast_raw = parse_resp.ast
+        
+    except Exception as e:
+        print(f"   ❌ Error de parseo: {str(e)}")
+        raise
 
-    ast_raw = parse_resp.ast
-    
     # --- PASO 3: ANÁLISIS SEMÁNTICO ---
-    print(f"🔎 Analizando semántica...")
-    sem_req = SemReq(ast=ast_raw)
-    sem_res = await _call_service(PARSER_URL, "/semantic", sem_req.model_dump(), "Análisis Semántico")
-    
-    ast_sem = sem_res.get("ast_sem")
-    if not ast_sem:
-        raise HTTPException(status_code=500, detail="El servicio de análisis semántico no retornó AST")
-    
+    print(f"\n[3/4] 🔎 ANÁLISIS SEMÁNTICO...")
+    try:
+        sem_req = SemReq(ast=ast_raw)
+        sem_res = await _call_service(PARSER_URL, "/semantic", sem_req.model_dump(), "Semantic Analysis")
+        
+        ast_sem = sem_res.get("ast_sem")
+        if not ast_sem:
+            raise HTTPException(status_code=500, detail="No semantic AST returned")
+        
+        print(f"   ✅ ANÁLISIS SEMÁNTICO COMPLETADO")
+        
+    except Exception as e:
+        print(f"   ❌ Error semántico: {str(e)}")
+        raise
+
     # --- PASO 4: ANÁLISIS DE COMPLEJIDAD ---
-    print(f"📊 Analizando complejidad...")
-    analysis_req = AnalyzeAstReq(
-        ast_sem=ast_sem, 
-        objective=req.objective,
-        cost_model=None
-    )
-    analysis_res = await _call_service(ANALYZER_URL, "/analyze-ast", analysis_req.model_dump(), "Análisis de Complejidad")
+    print(f"\n[4/4] 📊 ANÁLISIS DE COMPLEJIDAD...")
+    try:
+        analysis_req = AnalyzeAstReq(
+            ast_sem=ast_sem, 
+            objective=req.objective,
+            cost_model=None
+        )
+        analysis_res = await _call_service(
+            ANALYZER_URL, 
+            "/analyze-ast", 
+            analysis_req.model_dump(), 
+            "Complexity Analysis"
+        )
+        
+        analysis_result = AnalyzerResult.model_validate(analysis_res)
+        print(f"   ✅ COMPLEJIDAD ANALIZADA")
+        print(f"      O(n):  {analysis_result.big_o}")
+        print(f"      Ω(n):  {analysis_result.big_omega}")
+        print(f"      Θ(n):  {analysis_result.theta}")
+        
+    except Exception as e:
+        print(f"   ❌ Error de complejidad: {str(e)}")
+        raise
+
+    # --- RESPUESTA FINAL ---
+    print(f"\n✅ ANÁLISIS COMPLETADO EXITOSAMENTE")
+    print(f"{'='*60}\n")
     
-    analysis_result = AnalyzerResult.model_validate(analysis_res)
-    
-    # --- PASO 5: RESPUESTA FINAL ---
-    print(f"✅ Análisis completado exitosamente")
+    all_notes = [*correction_notes, *(analysis_result.notes or [])]
     
     return OrchestratorResponse(
         normalized_code=normalized_code,
         big_o=analysis_result.big_o,
-        big_omega=analysis_result.big_omega,
-        theta=analysis_result.theta,
+        big_omega=analysis_result.big_omega or "N/A",
+        theta=analysis_result.theta or "N/A",
         ir=analysis_result.ir,
-        notes=[*correction_notes, *(analysis_result.notes or [])]
+        notes=all_notes if all_notes else None
     )
 
 # ---------------------------------------------------------------------------
-# RUTA DE SALUD (HEALTH CHECK)
+# HEALTH CHECK
 # ---------------------------------------------------------------------------
 
-@app.get("/health")
+@router.get("/health")
 async def health_check() -> Dict[str, str]:
-    """Verificación de estado del Orquestador."""
-    return {"status": "ok", "service": "orchestrator"}
+    """Verificación de estado del Orchestrator."""
+    return {
+        "status": "ok", 
+        "service": "orchestrator",
+        "version": "1.0.0"
+    }
