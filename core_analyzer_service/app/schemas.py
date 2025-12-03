@@ -105,6 +105,8 @@ class AnalyzeAstResp(BaseModel):
         ir_avg: Representación IR del caso promedio (JSON, opcional).
         lines: Costos línea por línea (solo si detail="line-by-line").
         notes: Comentarios o advertencias del análisis.
+        method_used: Método principal usado en el análisis recursivo
+                     (por ejemplo: "master_theorem", "recursion_tree + iteration").
     """
     algorithm_kind: str
     big_o: str
@@ -118,6 +120,13 @@ class AnalyzeAstResp(BaseModel):
 
     lines: Optional[List[LineCost]] = None
     notes: Optional[str] = None
+
+    # 👉 NUEVO
+    method_used: Optional[str] = Field(
+        default=None,
+        description="Método principal utilizado en el análisis (p.ej. 'master_theorem', 'characteristic_equation + iteration')."
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -202,3 +211,10 @@ class analyzeAstResp(BaseModel):
 
     lines: Optional[List[LineCost]] = None
     notes: Optional[str] = None
+
+    # 👉 NUEVO: método usado por el analizador
+    method_used: Optional[str] = Field(
+        default=None,
+        description="Método principal utilizado en el análisis (p.ej. 'master_theorem', 'recursion_tree + iteration')."
+    )
+
