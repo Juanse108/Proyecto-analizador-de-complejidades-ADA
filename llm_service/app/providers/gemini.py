@@ -802,3 +802,88 @@ class GeminiProvider:
         Actualmente lanza NotImplementedError.
         """
         raise NotImplementedError("compare (Gemini) pendiente")
+
+    async def validate_grammar(self, pseudocode: str) -> dict:
+        """
+        Valida y corrige pseudocódigo existente basándose en la gramática.
+        
+        Si el pseudocódigo es válido, devuelve el mismo.
+        Si tiene errores, lo corrige automáticamente.
+        
+        Args:
+            pseudocode: Pseudocódigo a validar/corregir
+            
+        Returns:
+            Dict con:
+            - corrected_pseudocode: Pseudocódigo corregido
+            - is_valid: bool indicando si estaba válido
+            - issues: Lista de correcciones realizadas
+        """
+        if not self.client:
+            return {
+                "corrected_pseudocode": pseudocode,
+                "is_valid": True,
+                "issues": ["GEMINI_API_KEY no configurada: se retorna pseudocódigo original"]
+            }
+        
+        return await asyncio.to_thread(self._validate_grammar_sync, pseudocode)
+
+    def _validate_grammar_sync(self, pseudocode: str) -> dict:
+        """
+        Implementación síncrona de validación de gramática.
+        """
+        issues: List[str] = []
+        
+        validation_prompt = f"""{SYSTEM_RULES}
+
+Tu tarea AHORA es validar si el siguiente pseudocódigo cumple la gramática estricta.
+
+PSEUDOCÓDIGO A VALIDAR:
+```
+{pseudocode.strip()}
+```
+
+Si el pseudocódigo es correcto, devuelve JSON:
+{{"is_valid": true, "corrected_pseudocode": "<el mismo pseudocódigo>", "issues": []}}
+
+Si tiene errores, devuelve JSON:
+{{"is_valid": false, "corrected_pseudocode": "<pseudocódigo corregido>", "issues": ["error1", "error2", ...]}}
+
+Responde SOLO con JSON válido, sin explicaciones adicionales.
+"""
+
+        try:
+            for model_name in self.models_chain:
+                try:
+                    raw, attempts = self._call_with_retries(model_name, validation_prompt)
+                    data = _extract_json(raw)
+
+                    corrected = _clean((data.get("corrected_pseudocode") or pseudocode).strip())
+                    is_valid = data.get("is_valid", True)
+                    validation_issues = data.get("issues", [])
+
+                    # Postprocesar el pseudocódigo corregido
+                    corrected = _dialect_lint(corrected)
+
+                    return {
+                        "corrected_pseudocode": corrected,
+                        "is_valid": is_valid,
+                        "issues": [f"[{model_name}]"] + validation_issues,
+                    }
+
+                except Exception as e:
+                    issues.append(f"[{model_name}] {type(e).__name__}: {e}")
+
+            # Si todos fallan, retornamos el pseudocódigo original
+            return {
+                "corrected_pseudocode": pseudocode,
+                "is_valid": False,
+                "issues": ["Validación fallida, retornando pseudocódigo original"] + issues,
+            }
+
+        except Exception as e:
+            return {
+                "corrected_pseudocode": pseudocode,
+                "is_valid": False,
+                "issues": [f"Error inesperado: {str(e)}"],
+            }

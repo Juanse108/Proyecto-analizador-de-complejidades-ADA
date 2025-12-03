@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from pydantic import BaseModel
 from ..schemas import (
     ToGrammarRequest, ToGrammarResponse,
     RecurrenceRequest, RecurrenceResponse,
@@ -10,14 +11,32 @@ from ..providers.gemini import GeminiProvider
 router = APIRouter()
 
 
+class ValidateGrammarRequest(BaseModel):
+    """Petición para validar/corregir pseudocódigo."""
+    pseudocode: str
+
+
+class ValidateGrammarResponse(BaseModel):
+    """Respuesta de validación/corrección de pseudocódigo."""
+    corrected_pseudocode: str
+    is_valid: bool
+    issues: list
+
+
 def provider() -> GeminiProvider:
-    # Instancia simple; si luego quieres singleton, lo movemos.
     return GeminiProvider()
 
 
 @router.post("/to-grammar", response_model=ToGrammarResponse)
 async def to_grammar(payload: ToGrammarRequest):
     return await provider().to_grammar(payload)
+
+
+@router.post("/validate-grammar", response_model=ValidateGrammarResponse)
+async def validate_grammar(payload: ValidateGrammarRequest):
+    """Valida y corrige pseudocódigo existente."""
+    result = await provider().validate_grammar(payload.pseudocode)
+    return ValidateGrammarResponse(**result)
 
 
 @router.post("/recurrence", response_model=RecurrenceResponse)

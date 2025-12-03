@@ -117,20 +117,23 @@ async def _call_service(url: str, endpoint: str, payload: dict, error_msg: str) 
                 detail=f"Fallo de conexión con {error_msg} en {full_url}: {str(e)}"
             )
 
+
 # ---------------------------------------------------------------------------
-# ENDPOINT PRINCIPAL: ANÁLISIS COMPLETO
+# ENDPOINT PRINCIPAL: ANÁLISIS COMPLETO CON CORRECCIÓN LLM
 # ---------------------------------------------------------------------------
 
 @app.post("/analyze", response_model=OrchestratorResponse)
 async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     """
     Ejecuta el pipeline completo de análisis:
-    1. Normalización (LLM / Agente de Gramática).
-    2. Parseo Sintáctico (Parser Service).
-    3. Análisis Semántico (Parser Service).
-    4. Análisis de Complejidad (Analyzer Service).
+    1. Normalización inicial (LLM - Agente de Gramática) - NUEVO
+    2. Validación y corrección de gramática (LLM) - NUEVO PASO CRÍTICO
+    3. Parseo Sintáctico (Parser Service).
+    4. Análisis Semántico (Parser Service).
+    5. Análisis de Complejidad (Analyzer Service).
     """
     normalized_code = req.code
+    correction_notes: list = []
 
     # --- PASO 1: AGENTE DE NORMALIZACIÓN (LLM) ---
     try:
@@ -143,18 +146,52 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     except Exception as e:
         print(f"⚠ Error inesperado en normalización: {str(e)}")
         normalized_code = req.code
-    
+
+    # --- PASO 1.5 (NUEVO): VALIDACIÓN Y CORRECCIÓN DE GRAMÁTICA (LLM) ---
+    print(f"🔍 Validando gramática del pseudocódigo con LLM...")
+    try:
+        validate_payload = {"pseudocode": normalized_code}
+        validation_res = await _call_service(
+            LLM_URL, 
+            "/llm/validate-grammar", 
+            validate_payload, 
+            "Validación de Gramática"
+        )
+        
+        corrected_code = validation_res.get("corrected_pseudocode", normalized_code)
+        is_valid = validation_res.get("is_valid", False)
+        issues = validation_res.get("issues", [])
+        
+        correction_notes = issues
+        
+        if not is_valid:
+            print(f"⚠ Pseudocódigo corregido por LLM")
+            print(f"Correcciones realizadas: {issues}")
+            normalized_code = corrected_code
+        else:
+            print(f"✓ Pseudocódigo válido según gramática")
+            
+    except Exception as e:
+        print(f"⚠ Validación de gramática falló, continuando con código original: {str(e)}")
+        # Continuamos con el código que tenemos, aunque no haya sido validado
+
     # --- PASO 2: PARSEO SINTÁCTICO ---
+    print(f"📝 Parseando pseudocódigo...")
     parse_payload = {"code": normalized_code}
     parse_res = await _call_service(PARSER_URL, "/parse", parse_payload, "Parser Sintáctico")
     
     parse_resp = ParseResp.model_validate(parse_res)
     if not parse_resp.ok:
-        raise HTTPException(status_code=400, detail=f"Error de Sintaxis: {parse_resp.errors}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Error de Sintaxis: {parse_resp.errors}\n" +
+                   f"Pseudocódigo que causó error:\n{normalized_code}"
+        )
 
     ast_raw = parse_resp.ast
     
     # --- PASO 3: ANÁLISIS SEMÁNTICO ---
+    print(f"🔎 Analizando semántica...")
     sem_req = SemReq(ast=ast_raw)
     sem_res = await _call_service(PARSER_URL, "/semantic", sem_req.model_dump(), "Análisis Semántico")
     
@@ -163,6 +200,7 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         raise HTTPException(status_code=500, detail="El servicio de análisis semántico no retornó AST")
     
     # --- PASO 4: ANÁLISIS DE COMPLEJIDAD ---
+    print(f"📊 Analizando complejidad...")
     analysis_req = AnalyzeAstReq(
         ast_sem=ast_sem, 
         objective=req.objective,
@@ -173,13 +211,15 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     analysis_result = AnalyzerResult.model_validate(analysis_res)
     
     # --- PASO 5: RESPUESTA FINAL ---
+    print(f"✅ Análisis completado exitosamente")
+    
     return OrchestratorResponse(
         normalized_code=normalized_code,
         big_o=analysis_result.big_o,
         big_omega=analysis_result.big_omega,
         theta=analysis_result.theta,
         ir=analysis_result.ir,
-        notes=analysis_result.notes
+        notes=[*correction_notes, *(analysis_result.notes or [])]
     )
 
 # ---------------------------------------------------------------------------
