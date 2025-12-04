@@ -8,13 +8,39 @@ export interface AnalyzeRequest {
   objective: 'worst' | 'best' | 'average';
 }
 
+export interface LineCostDetail {
+  line: number;
+  kind: string;
+  text?: string;
+  multiplier?: string;
+  cost_worst?: string;
+  cost_best?: string;
+  cost_avg?: string;
+}
+
+export interface StrongBounds {
+  formula: string;
+  terms: Array<{ expr: string; degree: number[] }>;
+  dominant_term: string;
+  constant: number;
+  evaluated_at?: any;
+}
+
 export interface AnalyzeResponse {
   normalized_code: string;
   big_o: string;
   big_omega: string;
-  theta: string;
+  theta?: string;
   ir?: string;
   notes?: string[];
+  // Nuevos campos
+  algorithm_kind?: string;
+  ir_worst?: any;
+  ir_best?: any;
+  ir_avg?: any;
+  lines?: LineCostDetail[];
+  method_used?: string;
+  strong_bounds?: StrongBounds;
 }
 
 @Injectable({

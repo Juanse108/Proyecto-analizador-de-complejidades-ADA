@@ -1,5 +1,6 @@
 import os
 import httpx
+import re
 from typing import Dict, List
 from fastapi import APIRouter, HTTPException
 import asyncio
@@ -58,21 +59,28 @@ class LLMClient:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 print(f"📤 LLM validate-grammar: {self.base_url}/llm/validate-grammar")
+                print(f"   📝 Pseudocódigo enviado (primeros 150 chars):")
+                print(f"   {pseudocode[:150]}...")
+                
                 response = await client.post(
                     f"{self.base_url}/llm/validate-grammar", 
                     json=payload
                 )
                 response.raise_for_status()
                 result = response.json()
+                
                 print(f"✅ LLM validation OK")
+                print(f"   is_valid: {result.get('is_valid')}")
+                print(f"   issues: {len(result.get('issues', []))} encontrados")
+                
                 return result
             except httpx.HTTPStatusError as e:
                 error_text = e.response.text
-                print(f"⚠️ LLM validation error ({e.response.status_code}): {error_text}")
+                print(f"⚠️ LLM validation error ({e.response.status_code}): {error_text[:200]}")
                 return {
                     "corrected_pseudocode": pseudocode,
                     "is_valid": False,
-                    "issues": [f"LLM error: {error_text}"]
+                    "issues": [f"LLM error: {error_text[:100]}"]
                 }
             except Exception as e:
                 print(f"⚠️ LLM connection error: {str(e)}")
@@ -83,6 +91,46 @@ class LLMClient:
                 }
 
 llm_client = LLMClient(LLM_URL)
+
+# ---------------------------------------------------------------------------
+# FUNCIONES DE POST-PROCESAMIENTO DE PSEUDOCÓDIGO
+# ---------------------------------------------------------------------------
+
+def _fix_end_else_format(pseudocode: str) -> str:
+    """
+    Asegura que 'end else' esté en la MISMA línea, separado por UN SOLO espacio.
+    
+    Convierte:
+        end
+        else
+    En:
+        end else
+    
+    Esto es CRÍTICO para que el parser funcione correctamente.
+    
+    Args:
+        pseudocode: Pseudocódigo que puede tener 'end' y 'else' en líneas separadas.
+        
+    Returns:
+        Pseudocódigo con 'end else' correcto.
+    """
+    # Patrón: 'end' (con espacios alrededor) seguido de salto de línea y luego 'else'
+    result = re.sub(
+        r'(?m)^\s*(end)\s*\n\s*(else)\b',
+        r'\1 \2',
+        pseudocode,
+        flags=re.MULTILINE | re.IGNORECASE
+    )
+    
+    # Segundas pasada: eliminar espacios múltiples entre 'end' y 'else'
+    result = re.sub(
+        r'(?i)(end)\s{2,}(else)\b',
+        r'\1 \2',
+        result,
+        flags=re.IGNORECASE
+    )
+    
+    return result
 
 # ---------------------------------------------------------------------------
 # FUNCIONES AUXILIARES
@@ -106,19 +154,22 @@ async def _call_service(url: str, endpoint: str, payload: dict, error_msg: str) 
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             print(f"📤 POST {full_url}")
-            print(f"   Payload: {str(payload)[:100]}...")
+            print(f"   Payload keys: {list(payload.keys())}")
+            
             response = await client.post(full_url, json=payload)
             response.raise_for_status()
             result = response.json()
+            
             print(f"✅ {error_msg}: OK")
             return result
+            
         except httpx.HTTPStatusError as e:
             error_detail = e.response.text
             print(f"❌ {error_msg} error ({e.response.status_code})")
-            print(f"   Response: {error_detail[:200]}")
+            print(f"   Response: {error_detail[:300]}")
             raise HTTPException(
                 status_code=500, 
-                detail=f"{error_msg}: {error_detail[:200]}"
+                detail=f"{error_msg}: {error_detail[:300]}"
             )
         except asyncio.TimeoutError:
             print(f"❌ {error_msg}: Timeout (60s)")
@@ -161,7 +212,7 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     print(f"🚀 INICIANDO ANÁLISIS DE COMPLEJIDAD")
     print(f"{'='*70}")
     print(f"Objetivo: {req.objective}")
-    print(f"Código:\n{req.code[:100]}...")
+    print(f"Código (primeros 200 chars):\n{req.code[:200]}...")
     
     normalized_code = req.code
     correction_notes: List[str] = []
@@ -179,15 +230,24 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         
         if not is_valid and corrected_code != normalized_code:
             print(f"   ⚠️ CÓDIGO CORREGIDO POR LLM ({len(issues)} correcciones)")
-            for issue in issues[:3]:  # Mostrar primeras 3
+            for issue in issues[:3]:
                 print(f"      - {issue}")
             normalized_code = corrected_code
         else:
             print(f"   ✅ CÓDIGO VÁLIDO (sin correcciones necesarias)")
+        
+        # Mostrar pseudocódigo que se enviará al parser
+        print(f"\n   📄 Pseudocódigo que se enviará al parser:")
+        print(f"   {normalized_code[:200]}...")
             
     except Exception as e:
         print(f"   ⚠️ Error en validación LLM (continuando): {str(e)}")
         correction_notes.append(f"LLM validation warning: {str(e)}")
+
+    # --- PASO 1.5: CORRECCIÓN DE 'end else' (POST-PROCESAMIENTO) ---
+    print(f"\n[1.5/4] 🔧 CORRIGIENDO FORMATO 'end else'...")
+    normalized_code = _fix_end_else_format(normalized_code)
+    print(f"   ✅ Formato 'end else' normalizado")
 
     # --- PASO 2: PARSING SINTÁCTICO ---
     print(f"\n[2/4] 📝 PARSEANDO PSEUDOCÓDIGO...")
@@ -197,9 +257,12 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         
         parse_resp = ParseResp.model_validate(parse_res)
         if not parse_resp.ok:
+            print(f"   ❌ ERRORES DE PARSING:")
+            for error in parse_resp.errors:
+                print(f"      - {error}")
             raise HTTPException(
                 status_code=400, 
-                detail=f"Parse error: {', '.join(parse_resp.errors)}"
+                detail=f"Parse error: {'; '.join(parse_resp.errors)}"
             )
         
         print(f"   ✅ PARSING EXITOSO - AST generado")
@@ -272,7 +335,6 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     if correction_notes:
         all_notes.extend(correction_notes)
     
-    # ✅ Convertir notes a lista si es string
     if analysis_result.notes:
         if isinstance(analysis_result.notes, str):
             all_notes.append(analysis_result.notes)
@@ -285,7 +347,15 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         big_omega=analysis_result.big_omega or "N/A",
         theta=analysis_result.theta or "N/A",
         ir=analysis_result.ir,
-        notes=all_notes if all_notes else None
+        notes=all_notes if all_notes else None,
+        # Nuevos campos
+        algorithm_kind=analysis_result.algorithm_kind,
+        ir_worst=analysis_result.ir_worst,
+        ir_best=analysis_result.ir_best,
+        ir_avg=analysis_result.ir_avg,
+        lines=analysis_result.lines,
+        method_used=analysis_result.method_used,
+        strong_bounds=analysis_result.strong_bounds
     )
 
 # ---------------------------------------------------------------------------
