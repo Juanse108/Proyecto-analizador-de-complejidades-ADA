@@ -42,13 +42,29 @@ import { RecursionTreeService, RecursionTree, TraceTable } from '../services/com
           <p class="equation-note">Peor caso: {{ response.big_o }}</p>
         </div>
 
-        <!-- Ecuación Explícita (Iterativos) -->
-        <div *ngIf="response.algorithm_kind === 'iterative' && response.ir_worst" class="explicit-section">
-          <h4>📊 Expresión del Peor Caso</h4>
-          <div class="equation-box">
-            <p>{{ irExpression }}</p>
+        <!-- Sumatorias y Derivación (Iterativos) -->
+        <div *ngIf="response.algorithm_kind === 'iterative' && response.summations" class="summations-section">
+          <h4>🔣 Sumatorias y Derivación</h4>
+          
+          <!-- Tabs para peor/mejor/promedio -->
+          <div class="summations-tabs">
+            <ng-container *ngFor="let caseType of summationCases">
+              <button 
+                *ngIf="response.summations && response.summations[caseType]"
+                [class.active]="selectedSummationCase === caseType"
+                (click)="selectedSummationCase = caseType"
+                class="tab-button">
+                {{ getCaseLabel(caseType) }}
+              </button>
+            </ng-container>
           </div>
-          <p class="equation-note">Complejidad: {{ response.big_o }}</p>
+
+          <!-- Contenido de la sumatoria seleccionada -->
+          <div class="summation-content" *ngIf="response.summations && response.summations[selectedSummationCase]">
+            <div class="summation-formula">
+              <pre>{{ response.summations[selectedSummationCase] }}</pre>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -101,34 +117,6 @@ import { RecursionTreeService, RecursionTree, TraceTable } from '../services/com
             <p><strong>Descripción:</strong> {{ recursionTree.description }}</p>
           </div>
         </div>
-      </div>
-
-      <!-- Tabla de Rastreo -->
-      <div *ngIf="complexityType === 'iterative'" class="table-container">
-        <h3>📊 Tabla de Rastreo</h3>
-        <table *ngIf="traceTable" class="trace-table">
-          <thead>
-            <tr>
-              <th>Iteración</th>
-              <th>Condición</th>
-              <th>Variable</th>
-              <th>Costo</th>
-              <th>Costo Acumulado</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let row of traceTable.iterations">
-              <td>{{ row.iteration }}</td>
-              <td>{{ row.condition }}</td>
-              <td>{{ row.variable }}</td>
-              <td>{{ row.cost }}</td>
-              <td>{{ row.cumulativeCost }}</td>
-            </tr>
-            <tr class="summary-row">
-              <td colspan="5"><strong>Total:</strong> {{ traceTable.totalCost }}</td>
-            </tr>
-          </tbody>
-        </table>
       </div>
 
       <!-- Desconocido -->
@@ -256,6 +244,91 @@ import { RecursionTreeService, RecursionTree, TraceTable } from '../services/com
       font-size: 0.9em;
       color: #666;
       font-style: italic;
+    }
+
+    /* Sumatorias y Derivación */
+    .summations-section {
+      margin-top: 15px;
+      padding: 15px;
+      background: white;
+      border-radius: 6px;
+      border-left: 4px solid #00897b;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .summations-section h4 {
+      margin-top: 0;
+      color: #00695c;
+      margin-bottom: 15px;
+      font-size: 1.1em;
+    }
+
+    .summations-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 15px;
+      border-bottom: 2px solid #e0f2f1;
+      padding-bottom: 10px;
+    }
+
+    .tab-button {
+      padding: 8px 16px;
+      background: #f5f5f5;
+      border: none;
+      border-radius: 4px 4px 0 0;
+      cursor: pointer;
+      font-size: 0.95em;
+      color: #666;
+      transition: all 0.3s ease;
+      font-weight: 500;
+      border-bottom: 3px solid transparent;
+    }
+
+    .tab-button:hover {
+      background: #e0f2f1;
+      color: #00695c;
+    }
+
+    .tab-button.active {
+      background: #00897b;
+      color: white;
+      border-bottom: 3px solid #00695c;
+    }
+
+    .summation-content {
+      animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(-5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .summation-formula {
+      background: #f5f5f5;
+      padding: 15px;
+      border-radius: 4px;
+      border-left: 3px solid #00897b;
+      overflow-x: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 1em;
+      line-height: 1.6;
+      color: #333;
+    }
+
+    .summation-formula pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: 'Courier New', monospace;
+      color: #00695c;
+      font-weight: 500;
     }
 
     /* Análisis Línea por Línea */
@@ -477,6 +550,8 @@ export class ComplexityVisualizerComponent implements OnInit, OnChanges {
   
   methodName: string = '';
   irExpression: string = '';
+  selectedSummationCase: 'worst' | 'best' | 'avg' = 'worst';
+  summationCases: Array<'worst' | 'best' | 'avg'> = ['worst', 'best', 'avg'];
 
   constructor(
     private recursionTreeService: RecursionTreeService,
@@ -618,5 +693,14 @@ export class ComplexityVisualizerComponent implements OnInit, OnChanges {
     }
 
     return 'T(n)';
+  }
+
+  getCaseLabel(caseType: 'worst' | 'best' | 'avg'): string {
+    const labels: { [key: string]: string } = {
+      'worst': 'Peor Caso (O)',
+      'best': 'Mejor Caso (Ω)',
+      'avg': 'Caso Promedio (Θ)'
+    };
+    return labels[caseType] || caseType;
   }
 }

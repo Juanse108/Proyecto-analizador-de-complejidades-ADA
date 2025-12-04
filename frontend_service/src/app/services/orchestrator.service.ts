@@ -41,6 +41,11 @@ export interface AnalyzeResponse {
   lines?: LineCostDetail[];
   method_used?: string;
   strong_bounds?: StrongBounds;
+  summations?: {
+    worst?: string;
+    best?: string;
+    avg?: string;
+  };
 }
 
 @Injectable({

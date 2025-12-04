@@ -87,32 +87,62 @@ class LineCost(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 4. RESPONSE MODELS
+# 4. STRONG BOUNDS (COTAS FUERTES)
 # ---------------------------------------------------------------------------
 
-class AnalyzeAstResp(BaseModel):
+class StrongBounds(BaseModel):
     """
-    Respuesta del análisis de complejidad.
+    Representación de cotas fuertes con constantes explícitas.
+
+    Ejemplo:
+        T(n) = 5n² + 3n + 7
 
     Atributos:
-        algorithm_kind: Clasificación del algoritmo (iterativo/recursivo/mixto).
-        big_o: Notación Big-O (peor caso).
-        big_omega: Notación Big-Ω (mejor caso).
-        theta: Notación Θ (caso promedio / ajustado).
-        strong_bounds: Cotas más precisas (futuro: con constantes).
-        ir_worst: Representación IR del peor caso (JSON).
-        ir_best: Representación IR del mejor caso (JSON).
-        ir_avg: Representación IR del caso promedio (JSON, opcional).
-        lines: Costos línea por línea (solo si detail="line-by-line").
-        notes: Comentarios o advertencias del análisis.
-        method_used: Método principal usado en el análisis recursivo
-                     (por ejemplo: "master_theorem", "recursion_tree + iteration").
+        formula: Fórmula completa como string ("T(n) = 5n² + 3n + 7")
+        terms: Lista de términos individuales con sus coeficientes
+        dominant_term: Término que domina la complejidad ("5n²")
+        constant: Término constante (7)
+        evaluated_at: Ejemplos de valores concretos para n pequeños
+    """
+    formula: str = Field(
+        description="Fórmula completa: T(n) = 5n² + 3n + 7"
+    )
+    terms: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Lista de términos: [{expr: 'n²', degree: (2,0)}, ...]"
+    )
+    dominant_term: Optional[str] = Field(
+        default=None,
+        description="Término dominante para Big-O"
+    )
+    constant: int = Field(
+        default=0,
+        description="Término constante aditivo"
+    )
+    evaluated_at: Optional[Dict[str, int]] = Field(
+        default=None,
+        description="Valores evaluados: {10: 537, 100: 50307, ...}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5. RESPONSE MODELS
+# ---------------------------------------------------------------------------
+
+class analyzeAstResp(BaseModel):
+    """
+    Respuesta del análisis de complejidad (ACTUALIZADA).
     """
     algorithm_kind: str
     big_o: str
     big_omega: str
     theta: Optional[str] = None
-    strong_bounds: Optional[str] = None
+
+    # ✅ Cotas fuertes con fórmula explícita
+    strong_bounds: Optional[StrongBounds] = Field(
+        default=None,
+        description="Fórmula explícita: T(n) = 5n² + 3n + 7"
+    )
 
     ir_worst: Dict[str, Any]
     ir_best: Dict[str, Any]
@@ -121,16 +151,25 @@ class AnalyzeAstResp(BaseModel):
     lines: Optional[List[LineCost]] = None
     notes: Optional[str] = None
 
-    # 👉 NUEVO
+    # 👉 Método usado por el analizador
     method_used: Optional[str] = Field(
         default=None,
-        description="Método principal utilizado en el análisis (p.ej. 'master_theorem', 'characteristic_equation + iteration')."
+        description="Método principal utilizado en el análisis (p.ej. 'master_theorem', 'recursion_tree + iteration')."
+    )
+
+    # 👉 NUEVO: Sumatorias (texto plano, por caso)
+    summations: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Sumatorias y derivación por caso: worst/best/avg."
     )
 
 
+# Alias opcional para compatibilidad con código que use el nombre antiguo
+AnalyzeAstResp = analyzeAstResp
+
 
 # ---------------------------------------------------------------------------
-# 5. ERROR MODELS
+# 6. ERROR MODELS
 # ---------------------------------------------------------------------------
 
 class AnalysisError(BaseModel):
@@ -145,76 +184,3 @@ class AnalysisError(BaseModel):
     severity: Literal["error", "warning"]
     message: str
     location: Optional[str] = None
-
-
-# Agregar a schemas.py (nuevos modelos)
-
-# ---------------------------------------------------------------------------
-# STRONG BOUNDS (COTAS FUERTES)
-# ---------------------------------------------------------------------------
-
-class StrongBounds(BaseModel):
-    """
-    Representación de cotas fuertes con constantes explícitas.
-
-    Ejemplo:
-        T(n) = 5n² + 3n + 7
-
-    Atributos:
-        formula: Fórmula completa como string ("5n² + 3n + 7")
-        terms: Lista de términos individuales con sus coeficientes
-        dominant_term: Término que domina la complejidad ("5n²")
-        constant: Término constante (7)
-        evaluated_at: Ejemplos de valores concretos para n pequeños
-    """
-    formula: str = Field(
-        description="Fórmula completa: T(n) = 5n² + 3n + 7"
-    )
-    terms: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Lista de términos: [{coef: 5, expr: 'n²', degree: (2,0)}, ...]"
-    )
-    dominant_term: Optional[str] = Field(
-        default=None,
-        description="Término dominante para Big-O"
-    )
-    constant: int = Field(
-        default=0,
-        description="Término constante aditivo"
-    )
-    evaluated_at: Optional[Dict[str, int]] = Field(
-        default=None,
-        description="Valores evaluados: {n=10: 537, n=100: 50307, ...}"
-    )
-
-
-# Modificar AnalyzeAstResp para incluir strong_bounds como objeto
-
-class analyzeAstResp(BaseModel):
-    """
-    Respuesta del análisis de complejidad (ACTUALIZADA).
-    """
-    algorithm_kind: str
-    big_o: str
-    big_omega: str
-    theta: Optional[str] = None
-
-    # ✅ NUEVO: Cotas fuertes con fórmula explícita
-    strong_bounds: Optional[StrongBounds] = Field(
-        default=None,
-        description="Fórmula explícita: T(n) = 5n² + 3n + 7"
-    )
-
-    ir_worst: Dict[str, Any]
-    ir_best: Dict[str, Any]
-    ir_avg: Optional[Dict[str, Any]] = None
-
-    lines: Optional[List[LineCost]] = None
-    notes: Optional[str] = None
-
-    # 👉 NUEVO: método usado por el analizador
-    method_used: Optional[str] = Field(
-        default=None,
-        description="Método principal utilizado en el análisis (p.ej. 'master_theorem', 'recursion_tree + iteration')."
-    )
-
