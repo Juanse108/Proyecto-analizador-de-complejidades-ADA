@@ -33,7 +33,7 @@ export interface AnalyzeResponse {
   theta?: string;
   ir?: string;
   notes?: string[];
-  // Nuevos campos
+  
   algorithm_kind?: string;
   ir_worst?: any;
   ir_best?: any;
@@ -46,6 +46,9 @@ export interface AnalyzeResponse {
     best?: string;
     avg?: string;
   };
+  
+  // 🆕 NUEVO CAMPO
+  recurrence_equation?: string;
 }
 
 @Injectable({

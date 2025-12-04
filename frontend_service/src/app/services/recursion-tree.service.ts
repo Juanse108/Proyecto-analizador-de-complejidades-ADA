@@ -10,7 +10,7 @@ export interface RecursionNode {
 
 export interface RecursionTree {
   root: RecursionNode;
-  height: number;
+  height: number | string;
   totalCost: string;
   description: string;
 }
@@ -33,35 +33,29 @@ export interface TraceTable {
 })
 export class RecursionTreeService {
 
-  /**
-   * Analiza la respuesta del analyzer y determina si es recursivo o iterativo
-   */
   analyzeComplexity(response: AnalyzeResponse): {
     type: 'recursive' | 'iterative' | 'unknown';
     tree?: RecursionTree;
     table?: TraceTable;
   } {
+    const normalized = (response.normalized_code || '').toLowerCase();
     const bigO = (response.big_o || '').toLowerCase();
-    const notes = response.notes || [];
-    const normalizedCode = (response.normalized_code || '').toLowerCase();
 
     // Detectar si es recursivo o iterativo
     const isRecursive = 
-      notes.some(n => n.toLowerCase().includes('recursiv')) ||
-      notes.some(n => n.toLowerCase().includes('divide')) ||
-      notes.some(n => n.toLowerCase().includes('conquer')) ||
-      normalizedCode.includes('return');
+      response.algorithm_kind === 'recursive' ||
+      normalized.includes('call ') ||
+      !!response.recurrence_equation;
 
     const isIterative =
-      notes.some(n => n.toLowerCase().includes('iterativ')) ||
-      notes.some(n => n.toLowerCase().includes('loop')) ||
-      normalizedCode.includes('for ') ||
-      normalizedCode.includes('while ');
+      response.algorithm_kind === 'iterative' ||
+      normalized.includes('for ') ||
+      normalized.includes('while ');
 
     if (isRecursive && !isIterative) {
       return {
         type: 'recursive',
-        tree: this.generateRecursionTree(bigO, response)
+        tree: this.generateRecursionTree(normalized, bigO, response)
       };
     } else if (isIterative && !isRecursive) {
       return {
@@ -73,83 +67,250 @@ export class RecursionTreeService {
     return { type: 'unknown' };
   }
 
-  /**
-   * Genera un árbol de recursión basado en la complejidad
-   */
-  private generateRecursionTree(bigO: string, response: AnalyzeResponse): RecursionTree {
-    let height = 0;
-    let totalCost = bigO;
+  private generateRecursionTree(code: string, bigO: string, response: AnalyzeResponse): RecursionTree {
+    // 🆕 Detección específica por algoritmo
+    
+    // 1. MergeSort
+    if (code.includes('mergesort') || code.includes('merge_sort')) {
+      return this.generateMergeSortTree();
+    }
+    
+    // 2. QuickSort
+    if (code.includes('quicksort') || code.includes('quick_sort')) {
+      return this.generateQuickSortTree(bigO);
+    }
+    
+    // 3. Fibonacci
+    if (code.includes('fibonacci') || code.includes('fib(')) {
+      return this.generateFibonacciTree();
+    }
+    
+    // 4. Binary Search
+    if (code.includes('binarysearch') || code.includes('binary_search')) {
+      return this.generateBinarySearchTree();
+    }
+    
+    // 5. Factorial
+    if (code.includes('factorial') || code.includes('fact(')) {
+      return this.generateFactorialTree();
+    }
+    
+    // Fallback genérico basado en big-O
+    return this.generateGenericTree(bigO);
+  }
 
-    if (bigO.includes('n log n') || bigO.includes('n*log n')) {
-      height = 5;
-      totalCost = 'O(n log n)';
-    } else if (bigO.includes('log n')) {
-      height = 4;
-      totalCost = 'O(log n)';
-    } else if (bigO.includes('n²') || bigO.includes('n^2')) {
-      height = 4;
-      totalCost = 'O(n²)';
-    } else if (bigO.includes('n') && !bigO.includes('n²')) {
-      height = 3;
-      totalCost = 'O(n)';
-    } else if (bigO.includes('2^n')) {
-      height = 5;
-      totalCost = 'O(2ⁿ)';
+  // ===== ÁRBOLES ESPECÍFICOS =====
+
+  private generateMergeSortTree(): RecursionTree {
+    return {
+      root: {
+        level: 0,
+        cost: 'n',
+        width: 100,
+        children: [
+          {
+            level: 1,
+            cost: 'n/2',
+            width: 50,
+            children: [
+              { level: 2, cost: 'n/4', width: 25, children: [] },
+              { level: 2, cost: 'n/4', width: 25, children: [] }
+            ]
+          },
+          {
+            level: 1,
+            cost: 'n/2',
+            width: 50,
+            children: [
+              { level: 2, cost: 'n/4', width: 25, children: [] },
+              { level: 2, cost: 'n/4', width: 25, children: [] }
+            ]
+          }
+        ]
+      },
+      height: 'log₂(n)',
+      totalCost: 'O(n log n)',
+      description: 'MergeSort: División balanceada en 2 subproblemas de tamaño n/2. Cada nivel cuesta Θ(n). Con log₂(n) niveles, el costo total es Θ(n log n).'
+    };
+  }
+
+  private generateQuickSortTree(bigO: string): RecursionTree {
+    if (bigO.includes('n²') || bigO.includes('n^2')) {
+      // Peor caso: desbalanceado (cadena lineal)
+      return {
+        root: {
+          level: 0,
+          cost: 'n',
+          width: 100,
+          children: [
+            {
+              level: 1,
+              cost: 'n-1',
+              width: 90,
+              children: [
+                {
+                  level: 2,
+                  cost: 'n-2',
+                  width: 80,
+                  children: [
+                    { level: 3, cost: '...', width: 70, children: [] }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        height: 'n',
+        totalCost: 'O(n²)',
+        description: 'QuickSort (peor caso): Pivote siempre es el mínimo/máximo. Genera una cadena lineal n → n-1 → n-2 → ... → 1 con altura n. Costo por nivel ≈ n, total Θ(n²).'
+      };
     } else {
-      height = 3;
+      // Mejor/promedio caso: balanceado (como MergeSort)
+      return this.generateQuickSortBalancedTree();
     }
+  }
 
-    const root = this.buildRecursiveNode(height, 0, 100);
-
+  private generateQuickSortBalancedTree(): RecursionTree {
     return {
-      root,
-      height,
-      totalCost,
-      description: `Árbol de recursión - Complejidad ${totalCost}`
+      root: {
+        level: 0,
+        cost: 'n',
+        width: 100,
+        children: [
+          {
+            level: 1,
+            cost: 'n/2',
+            width: 50,
+            children: [
+              { level: 2, cost: 'n/4', width: 25, children: [] },
+              { level: 2, cost: 'n/4', width: 25, children: [] }
+            ]
+          },
+          {
+            level: 1,
+            cost: 'n/2',
+            width: 50,
+            children: [
+              { level: 2, cost: 'n/4', width: 25, children: [] },
+              { level: 2, cost: 'n/4', width: 25, children: [] }
+            ]
+          }
+        ]
+      },
+      height: 'log₂(n)',
+      totalCost: 'O(n log n)',
+      description: 'QuickSort (mejor/promedio caso): Pivote divide razonablemente. Árbol balanceado con 2 subproblemas de tamaño ≈ n/2. Altura log₂(n). Costo por nivel ≈ n, total Θ(n log n).'
     };
   }
 
-  /**
-   * Construye nodos recursivamente para el árbol
-   */
-  private buildRecursiveNode(
-    maxLevel: number,
-    currentLevel: number,
-    width: number
-  ): RecursionNode {
-    const levelCosts: { [key: number]: string } = {
-      0: 'n',
-      1: 'n/2 + n/2',
-      2: 'n/4 × 4',
-      3: '...',
-      4: 'O(1)'
-    };
-
-    const children: RecursionNode[] = [];
-    if (currentLevel < maxLevel - 1) {
-      const childWidth = width / 2;
-      children.push(
-        this.buildRecursiveNode(maxLevel, currentLevel + 1, childWidth)
-      );
-      children.push(
-        this.buildRecursiveNode(maxLevel, currentLevel + 1, childWidth)
-      );
-    }
-
+  private generateFibonacciTree(): RecursionTree {
     return {
-      level: currentLevel,
-      cost: levelCosts[currentLevel] || `n/${Math.pow(2, currentLevel)}`,
-      width,
-      children
+      root: {
+        level: 0,
+        cost: 'T(n)',
+        width: 100,
+        children: [
+          {
+            level: 1,
+            cost: 'T(n-1)',
+            width: 60,
+            children: [
+              { level: 2, cost: 'T(n-2)', width: 30, children: [] },
+              { level: 2, cost: 'T(n-3)', width: 30, children: [] }
+            ]
+          },
+          {
+            level: 1,
+            cost: 'T(n-2)',
+            width: 40,
+            children: [
+              { level: 2, cost: 'T(n-3)', width: 20, children: [] },
+              { level: 2, cost: 'T(n-4)', width: 20, children: [] }
+            ]
+          }
+        ]
+      },
+      height: 'n',
+      totalCost: 'O(2^n)',
+      description: 'Fibonacci recursivo: Árbol binario donde cada nodo T(n) se divide en T(n-1) y T(n-2). Altura ≈ n. Número de nodos ≈ Φ(φ^n) ≈ O(2^n), donde φ ≈ 1.618 (razón áurea). Por tanto, costo total Θ(φ^n) ≈ O(2^n).'
     };
   }
 
-  /**
-   * Genera tabla de rastreo para algoritmos iterativos
-   */
+  private generateBinarySearchTree(): RecursionTree {
+    return {
+      root: {
+        level: 0,
+        cost: 'n',
+        width: 100,
+        children: [
+          {
+            level: 1,
+            cost: 'n/2',
+            width: 100,
+            children: [
+              {
+                level: 2,
+                cost: 'n/4',
+                width: 100,
+                children: [
+                  { level: 3, cost: '...', width: 100, children: [] }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      height: 'log₂(n)',
+      totalCost: 'O(log n)',
+      description: 'Binary Search recursivo: Una única rama que reduce el espacio búsqueda a la mitad en cada nivel (n → n/2 → n/4 → ... → 1). Altura: log₂(n). Trabajo por nivel: O(1). Costo total: O(log n).'
+    };
+  }
+
+  private generateFactorialTree(): RecursionTree {
+    return {
+      root: {
+        level: 0,
+        cost: 'n',
+        width: 100,
+        children: [
+          {
+            level: 1,
+            cost: 'n-1',
+            width: 100,
+            children: [
+              {
+                level: 2,
+                cost: 'n-2',
+                width: 100,
+                children: [
+                  { level: 3, cost: '...', width: 100, children: [] }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      height: 'n',
+      totalCost: 'O(n)',
+      description: 'Factorial recursivo: Cadena lineal n → n-1 → n-2 → ... → 1. Altura: n. Trabajo por nivel: O(1). Costo total: O(n).'
+    };
+  }
+
+  private generateGenericTree(bigO: string): RecursionTree {
+    // Fallback basado en big-O
+    if (bigO.includes('log')) {
+      return this.generateBinarySearchTree();
+    } else if (bigO.includes('2^n')) {
+      return this.generateFibonacciTree();
+    } else {
+      return this.generateMergeSortTree();
+    }
+  }
+
+  // ===== TABLA ITERATIVA (sin cambios) =====
+
   private generateTraceTable(bigO: string, response: AnalyzeResponse): TraceTable {
     const iterations: TraceRow[] = [];
-    let totalCost = bigO;
 
     if (bigO.includes('n²') || bigO.includes('n^2')) {
       for (let i = 1; i <= 5; i++) {
@@ -161,19 +322,10 @@ export class RecursionTreeService {
           cumulativeCost: `${i}n`
         });
       }
-      totalCost = 'O(n²)';
-    } else if (bigO.includes('n') && !bigO.includes('n²')) {
-      for (let i = 1; i <= 5; i++) {
-        iterations.push({
-          iteration: i,
-          condition: 'i ≤ n',
-          variable: `i = ${i}`,
-          cost: '1',
-          cumulativeCost: `${i}`
-        });
-      }
-      totalCost = 'O(n)';
-    } else if (bigO.includes('log n')) {
+      return { iterations, totalCost: 'O(n²)' };
+    }
+
+    if (bigO.includes('log')) {
       for (let i = 0; i < 4; i++) {
         iterations.push({
           iteration: i + 1,
@@ -183,12 +335,19 @@ export class RecursionTreeService {
           cumulativeCost: `${i + 1}`
         });
       }
-      totalCost = 'O(log n)';
+      return { iterations, totalCost: 'O(log n)' };
     }
 
-    return {
-      iterations,
-      totalCost
-    };
+    // Por defecto: O(n)
+    for (let i = 1; i <= 5; i++) {
+      iterations.push({
+        iteration: i,
+        condition: 'i ≤ n',
+        variable: `i = ${i}`,
+        cost: '1',
+        cumulativeCost: `${i}`
+      });
+    }
+    return { iterations, totalCost: 'O(n)' };
   }
 }

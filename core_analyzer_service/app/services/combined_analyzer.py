@@ -215,6 +215,7 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
             summations=summations,  # 👈 IMPORTANTE: se expone summations para el front
         )
 
+
     # ---------------------------------------------------------------
     # CASO RECURSIVO
     # ---------------------------------------------------------------
@@ -232,7 +233,7 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
 
         if rec_result.recurrence:
             rec: RecurrenceRelation = rec_result.recurrence
-            notes.append(f"Recurrencia detectada: T(n) = {rec.a}T(n/{rec.b}) + f(n)")
+            # Ya no duplicamos la info, la ecuación está en recurrence_equation
             if rec_result.master_theorem_case:
                 notes.append(f"Teorema Maestro caso {rec_result.master_theorem_case}")
 
@@ -250,6 +251,7 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
             lines=None,
             notes=" | ".join(notes),
             method_used=method_used,
+            recurrence_equation=rec_result.recurrence_equation,  # 🆕 NUEVO
         )
 
     # ---------------------------------------------------------------

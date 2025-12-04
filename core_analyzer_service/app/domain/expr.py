@@ -277,7 +277,10 @@ def to_json(e: Expr):
     if isinstance(e, Sym):
         return {"name": e.name}
     if isinstance(e, Pow):
-        return {"pow": {"name": e.base.name, "exp": e.exp}}
+        if isinstance(e.base, Sym):
+            return {"pow": {"name": e.base.name, "exp": e.exp}}
+        else:
+            return {"pow": {"base": to_json(e.base), "exp": e.exp}}
     if isinstance(e, Log):
         return {"log": {"arg": to_json(e.arg), "base": e.base}}
     if isinstance(e, Add):

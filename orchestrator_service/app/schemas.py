@@ -46,8 +46,6 @@ class AnalyzeAstReq(BaseModel):
         None, 
         description="Modelo de costo opcional."
     )
-
-
 # Estructura de respuesta del servicio Analyzer /analyze-ast
 class AnalyzerResult(BaseModel):
     """Resultado del análisis de complejidad."""
@@ -101,20 +99,25 @@ class AnalyzerResult(BaseModel):
         None,
         description="Sumatorias explícitas por caso (worst, best, avg)"
     )
+    
+    # 🆕 CAMPO FALTANTE - AÑADIR AQUÍ
+    recurrence_equation: Optional[str] = Field(
+        None,
+        description="Ecuación de recurrencia completa (solo algoritmos recursivos)"
+    )
 
     @field_validator('notes', mode='before')
     @classmethod
     def convert_notes_to_list(cls, v):
         """Convierte notes a lista si llega como string."""
         if isinstance(v, str):
-            return [v]  # Convertir string a lista
+            return [v]
         elif isinstance(v, list):
             return v
         elif v is None:
             return None
         return v
-
-
+    
 # ---------------------------------------------------------------------------
 # ESTRUCTURAS PÚBLICAS PARA EL CLIENTE (FRONTEND)
 # ---------------------------------------------------------------------------
@@ -139,64 +142,27 @@ class AnalyzeRequest(BaseModel):
         }
 
 
+
 class OrchestratorResponse(BaseModel):
     """Respuesta final del Orchestrator al Frontend."""
-    normalized_code: str = Field(
-        ..., 
-        description="Pseudocódigo final, corregido por LLM y validado por el parser."
-    )
-    big_o: str = Field(..., description="Notación O (Cota Superior - Peor Caso).")
-    big_omega: str = Field(..., description="Notación Ω (Cota Inferior - Mejor Caso).")
-    theta: str = Field(..., description="Notación Θ (Cota Ajustada - Caso Promedio).")
-    ir: Optional[Dict[str, Any]] = Field(
-        None, 
-        description="Representación Intermedia (IR) del análisis."
-    )
-    notes: Optional[List[str]] = Field(
-        None, 
-        description="Notas del análisis completo (incluyendo correcciones LLM)."
-    )
-    # Nuevos campos del backend de análisis
-    algorithm_kind: Optional[str] = Field(
+    normalized_code: str
+    big_o: str
+    big_omega: str
+    theta: str
+    ir: Optional[Dict[str, Any]] = None
+    notes: Optional[List[str]] = None
+    
+    algorithm_kind: Optional[str] = None
+    ir_worst: Optional[Dict[str, Any]] = None
+    ir_best: Optional[Dict[str, Any]] = None
+    ir_avg: Optional[Dict[str, Any]] = None
+    lines: Optional[List[Dict[str, Any]]] = None
+    method_used: Optional[str] = None
+    strong_bounds: Optional[Dict[str, Any]] = None
+    summations: Optional[Dict[str, str]] = None
+    
+    # 🆕 NUEVO CAMPO
+    recurrence_equation: Optional[str] = Field(
         None,
-        description="Tipo de algoritmo: 'recursive' o 'iterative'"
+        description="Ecuación de recurrencia completa (solo algoritmos recursivos)"
     )
-    ir_worst: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Representación IR del peor caso"
-    )
-    ir_best: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Representación IR del mejor caso"
-    )
-    ir_avg: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Representación IR del caso promedio"
-    )
-    lines: Optional[List[Dict[str, Any]]] = Field(
-        None,
-        description="Análisis línea por línea del código"
-    )
-    method_used: Optional[str] = Field(
-        None,
-        description="Método utilizado para el análisis (ej: master_theorem, iteration)"
-    )
-    strong_bounds: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Fórmula explícita con cotas ajustadas"
-    )
-    summations: Optional[Dict[str, str]] = Field(
-        None,
-        description="Sumatorias explícitas por caso (worst, best, avg)"
-    )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "normalized_code": "algorithm NestedLoop(array A, integer n)\nbegin\n  for i <- 1 to n do\n  begin\n    for j <- 1 to n do\n    begin\n      print(A[i] * A[j])\n    end\n  end\nend",
-                "big_o": "O(n²)",
-                "big_omega": "Ω(n²)",
-                "theta": "Θ(n²)",
-                "notes": ["Código validado por LLM", "Dos ciclos anidados: n * n iteraciones"]
-            }
-        }

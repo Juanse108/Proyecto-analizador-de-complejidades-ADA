@@ -129,16 +129,19 @@ class StrongBounds(BaseModel):
 # 5. RESPONSE MODELS
 # ---------------------------------------------------------------------------
 
+# ... (código anterior sin cambios hasta analyzeAstResp) ...
+
 class analyzeAstResp(BaseModel):
     """
-    Respuesta del análisis de complejidad (ACTUALIZADA).
+    Respuesta del análisis de complejidad.
+    
+    🆕 NUEVO: Campo recurrence_equation para mostrar en UI.
     """
     algorithm_kind: str
     big_o: str
     big_omega: str
     theta: Optional[str] = None
 
-    # ✅ Cotas fuertes con fórmula explícita
     strong_bounds: Optional[StrongBounds] = Field(
         default=None,
         description="Fórmula explícita: T(n) = 5n² + 3n + 7"
@@ -151,16 +154,20 @@ class analyzeAstResp(BaseModel):
     lines: Optional[List[LineCost]] = None
     notes: Optional[str] = None
 
-    # 👉 Método usado por el analizador
     method_used: Optional[str] = Field(
         default=None,
-        description="Método principal utilizado en el análisis (p.ej. 'master_theorem', 'recursion_tree + iteration')."
+        description="Método principal utilizado en el análisis."
     )
 
-    # 👉 NUEVO: Sumatorias (texto plano, por caso)
     summations: Optional[Dict[str, str]] = Field(
         default=None,
         description="Sumatorias y derivación por caso: worst/best/avg."
+    )
+
+    # 🆕 NUEVO CAMPO
+    recurrence_equation: Optional[str] = Field(
+        default=None,
+        description="Ecuación de recurrencia COMPLETA (solo para algoritmos recursivos).\nEjemplo: 'T(n) = 2·T(n/2) + c·n,  n > 1\\nT(1) = d'"
     )
 
 

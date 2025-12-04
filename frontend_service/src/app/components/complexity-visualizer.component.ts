@@ -33,14 +33,19 @@ import { RecursionTreeService, RecursionTree, TraceTable } from '../services/com
           </div>
         </div>
 
-        <!-- Ecuación de Recurrencia (Recursivos) -->
-        <div *ngIf="response.algorithm_kind === 'recursive' && response.ir_worst" class="recurrence-section">
+        <!-- Ecuación de Recurrencia (Recursivos)  -->
+        <div *ngIf="response.algorithm_kind === 'recursive' && response.recurrence_equation" 
+            class="recurrence-section">
           <h4>🔄 Ecuación de Recurrencia</h4>
           <div class="equation-box">
-            <p>{{ irExpression }}</p>
+            <pre style="margin: 0; font-family: 'Courier New', monospace; white-space: pre-wrap;">{{ response.recurrence_equation }}</pre>
           </div>
-          <p class="equation-note">Peor caso: {{ response.big_o }}</p>
+          <p class="equation-note">
+            Esta es la ecuación de recurrencia del algoritmo, no su solución.
+            La solución asintótica es: {{ response.big_o }}
+          </p>
         </div>
+
 
         <!-- Sumatorias y Derivación (Iterativos) -->
         <div *ngIf="response.algorithm_kind === 'iterative' && response.summations" class="summations-section">
