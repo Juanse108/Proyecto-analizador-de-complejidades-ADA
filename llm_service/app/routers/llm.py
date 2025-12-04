@@ -5,6 +5,7 @@ from ..schemas import (
     RecurrenceRequest, RecurrenceResponse,
     ClassifyRequest, ClassifyResponse,
     CompareRequest, CompareResponse,
+    CompareAnalysisRequest, CompareAnalysisResponse,
 )
 from ..providers.gemini import GeminiProvider
 
@@ -55,6 +56,19 @@ async def classify(payload: ClassifyRequest):
 @router.post("/compare", response_model=CompareResponse)
 async def compare(payload: CompareRequest):
     return await provider().compare(payload)
+
+
+@router.post("/compare-analysis", response_model=CompareAnalysisResponse)
+async def compare_analysis(payload: CompareAnalysisRequest):
+    """Compara análisis del LLM con el del analyzer del backend."""
+    try:
+        result = await provider().compare_analysis(
+            payload.pseudocode,
+            payload.analyzer_result.model_dump()
+        )
+        return CompareAnalysisResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/health")

@@ -6,6 +6,13 @@ import { OrchestratorService, AnalyzeResponse } from './services/orchestrator.se
 import { GeminiService, ToGrammarResponse, ComparisonResponse } from './services/gemini.service';
 import { ComplexityVisualizerComponent } from './components/complexity-visualizer.component';
 
+interface AlgorithmExample {
+  name: string;
+  type: 'iterativo' | 'recursivo';
+  complexity: string;
+  code: string;
+}
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -42,6 +49,239 @@ export class AppComponent implements OnInit {
   // Estado del servicio
   isServiceReady: boolean = false;
 
+  // 🆕 Menú de ejemplos
+  showExamplesMenu: boolean = false;
+  
+  examples: AlgorithmExample[] = [
+    {
+      name: 'Bubble Sort',
+      type: 'iterativo',
+      complexity: 'O(n²)',
+      code: `BubbleSort(A, n)
+begin
+  for i <- 1 to n - 1 do
+  begin
+    for j <- 1 to n - i do
+    begin
+      if (A[j] > A[j + 1]) then
+      begin
+        temp <- A[j]
+        A[j] <- A[j + 1]
+        A[j + 1] <- temp
+      end
+      else
+      begin
+        temp <- temp
+      end
+    end
+  end
+end`
+    },
+    {
+      name: 'Binary Search',
+      type: 'iterativo',
+      complexity: 'O(log n)',
+      code: `BinarySearch(A, n, x)
+begin
+  left <- 1
+  right <- n
+  while (left <= right) do
+  begin
+    mid <- (left + right) / 2
+    if (A[mid] = x) then
+    begin
+      return mid
+    end
+    else
+    begin
+      if (A[mid] < x) then
+      begin
+        left <- mid + 1
+      end
+      else
+      begin
+        right <- mid - 1
+      end
+    end
+  end
+  return -1
+end`
+    },
+    {
+      name: 'Selection Sort',
+      type: 'iterativo',
+      complexity: 'O(n²)',
+      code: `SelectionSort(A, n)
+begin
+  for i <- 1 to n - 1 do
+  begin
+    minIndex <- i
+    for j <- i + 1 to n do
+    begin
+      if (A[j] < A[minIndex]) then
+      begin
+        minIndex <- j
+      end
+      else
+      begin
+        minIndex <- minIndex
+      end
+    end
+    if (minIndex != i) then
+    begin
+      temp <- A[i]
+      A[i] <- A[minIndex]
+      A[minIndex] <- temp
+    end
+    else
+    begin
+      temp <- temp
+    end
+  end
+end`
+    },
+    {
+      name: 'Linear Search',
+      type: 'iterativo',
+      complexity: 'O(n)',
+      code: `LinearSearch(A, n, x)
+begin
+  i <- 1
+  found <- F
+  while (i <= n and found = F) do
+  begin
+    if (A[i] = x) then
+    begin
+      found <- T
+    end
+    else
+    begin
+      i <- i + 1
+    end
+  end
+end`
+    },
+    {
+      name: 'Matrix Multiplication',
+      type: 'iterativo',
+      complexity: 'O(n³)',
+      code: `MatrixMultiply(A, B, C, n)
+begin
+  for i <- 1 to n do
+  begin
+    for j <- 1 to n do
+    begin
+      C[i][j] <- 0
+      for k <- 1 to n do
+      begin
+        C[i][j] <- C[i][j] + A[i][k] * B[k][j]
+      end
+    end
+  end
+end`
+    },
+    {
+      name: 'Merge Sort (Recursivo)',
+      type: 'recursivo',
+      complexity: 'O(n log n)',
+      code: `MergeSort(A, inicio, fin)
+begin
+  if (inicio < fin) then
+  begin
+    medio <- (inicio + fin) / 2
+    CALL MergeSort(A, inicio, medio)
+    CALL MergeSort(A, medio + 1, fin)
+    CALL Merge(A, inicio, medio, fin)
+  end
+  else
+  begin
+    medio <- medio
+  end
+end`
+    },
+    {
+      name: 'QuickSort (Recursivo)',
+      type: 'recursivo',
+      complexity: 'O(n log n)',
+      code: `QuickSort(A, inicio, fin)
+begin
+  if (inicio < fin) then
+  begin
+    pivote <- Partition(A, inicio, fin)
+    CALL QuickSort(A, inicio, pivote - 1)
+    CALL QuickSort(A, pivote + 1, fin)
+  end
+  else
+  begin
+    pivote <- pivote
+  end
+end`
+    },
+    {
+      name: 'Fibonacci (Recursivo)',
+      type: 'recursivo',
+      complexity: 'O(2^n)',
+      code: `Fibonacci(n)
+begin
+  if (n <= 1) then
+  begin
+    return n
+  end
+  else
+  begin
+    return Fibonacci(n - 1) + Fibonacci(n - 2)
+  end
+end`
+    },
+    {
+      name: 'Binary Search (Recursivo)',
+      type: 'recursivo',
+      complexity: 'O(log n)',
+      code: `BinarySearchRec(A, x, inicio, fin)
+begin
+  if (inicio > fin) then
+  begin
+    return -1
+  end
+  else
+  begin
+    medio <- (inicio + fin) / 2
+    if (A[medio] = x) then
+    begin
+      return medio
+    end
+    else
+    begin
+      if (A[medio] < x) then
+      begin
+        return BinarySearchRec(A, x, medio + 1, fin)
+      end
+      else
+      begin
+        return BinarySearchRec(A, x, inicio, medio - 1)
+      end
+    end
+  end
+end`
+    },
+    {
+      name: 'Factorial (Recursivo)',
+      type: 'recursivo',
+      complexity: 'O(n)',
+      code: `Factorial(n)
+begin
+  if (n <= 1) then
+  begin
+    return 1
+  end
+  else
+  begin
+    return n * Factorial(n - 1)
+  end
+end`
+    }
+  ];
+
   constructor(
     private orchestratorService: OrchestratorService,
     private geminiService: GeminiService,
@@ -49,7 +289,6 @@ export class AppComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    // Verificar que el orchestrator esté disponible
     this.orchestratorService.healthCheck().subscribe({
       next: (response) => {
         this.isServiceReady = true;
@@ -58,15 +297,12 @@ export class AppComponent implements OnInit {
       error: (error) => {
         this.isServiceReady = false;
         console.error('❌ Error al conectar con Orchestrator:', error);
-        this.errorMsg = '⚠️ El servicio de backend no está disponible. Asegúrate de que el orchestrator esté corriendo en puerto 8000.';
+        this.errorMsg = '⚠️ El servicio de backend no está disponible.';
         this.cdr.detectChanges();
       }
     });
   }
 
-  /**
-   * Generar Pseudocódigo desde Lenguaje Natural usando Gemini
-   */
   async onGeneratePseudocode(): Promise<void> {
     if (!this.natLangInput.trim()) {
       this.errorMsg = '❌ Por favor ingresa una descripción del algoritmo';
@@ -81,34 +317,17 @@ export class AppComponent implements OnInit {
     this.cdr.detectChanges();
 
     try {
-      console.log('📝 Generando pseudocódigo desde Gemini 2.0:', this.natLangInput);
-      
       const response: ToGrammarResponse = await this.geminiService.toGrammar(this.natLangInput);
 
-      console.log('📦 Respuesta completa:', response);
-      console.log('📄 Pseudocódigo:', response.pseudocode_normalizado);
-      console.log('⚠️ Issues:', response.issues);
-
-      if (!response || !response.pseudocode_normalizado) {
-        throw new Error('Respuesta vacía del servicio Gemini');
-      }
-
-      // Asignar valores explícitamente
       this.generatedPseudocode = response.pseudocode_normalizado;
       this.inputCode = response.pseudocode_normalizado;
       this.issues = response.issues || [];
-
-      console.log('✅ Pseudocódigo asignado a variable:', this.generatedPseudocode.substring(0, 50));
-      console.log('✅ Pseudocódigo generado exitosamente');
 
       this.natLangInput = '';
       this.cdr.detectChanges();
 
     } catch (err: any) {
-      console.error('❌ Error en Gemini:', err);
       this.errorMsg = `❌ Error generando pseudocódigo: ${err.message || 'Error desconocido'}`;
-      this.generatedPseudocode = '';
-      this.issues = [];
       this.cdr.detectChanges();
     } finally {
       this.isGenerating = false;
@@ -116,9 +335,6 @@ export class AppComponent implements OnInit {
     }
   }
 
-  /**
-   * Analizar la complejidad del pseudocódigo
-   */
   onAnalyze(): void {
     if (!this.inputCode.trim()) {
       this.errorMsg = '❌ Por favor ingresa un código para analizar';
@@ -138,8 +354,6 @@ export class AppComponent implements OnInit {
     this.llmComparison = null;
     this.cdr.detectChanges();
 
-    console.log(`🔍 Analizando código con objetivo: ${this.selectedObjective}`);
-
     this.orchestratorService.analyze(this.inputCode, this.selectedObjective).subscribe({
       next: (response: AnalyzeResponse) => {
         this.result = response;
@@ -156,9 +370,6 @@ export class AppComponent implements OnInit {
     });
   }
 
-  /**
-   * Comparar resultado del Analyzer con análisis del LLM
-   */
   async onCompareLLM(): Promise<void> {
     if (!this.result) {
       this.comparisonError = '❌ No hay resultado del analyzer para comparar';
@@ -172,23 +383,19 @@ export class AppComponent implements OnInit {
     this.cdr.detectChanges();
 
     try {
-      console.log('🔍 Comparando con análisis LLM...');
-      
       const comparison = await this.geminiService.compareAnalysis(
         this.result.normalized_code,
         {
           big_o: this.result.big_o,
           big_omega: this.result.big_omega,
-          theta: this.result.theta
+          theta: this.result.theta ?? undefined
         }
       );
 
       this.llmComparison = comparison;
-      console.log('✅ Comparación completada:', comparison);
       this.cdr.detectChanges();
 
     } catch (err: any) {
-      console.error('❌ Error en comparación LLM:', err);
       this.comparisonError = `❌ Error en comparación: ${err.message || 'Error desconocido'}`;
       this.cdr.detectChanges();
     } finally {
@@ -197,9 +404,6 @@ export class AppComponent implements OnInit {
     }
   }
 
-  /**
-   * Limpiar el pseudocódigo generado
-   */
   clearGenerated(): void {
     this.generatedPseudocode = '';
     this.issues = [];
@@ -208,9 +412,6 @@ export class AppComponent implements OnInit {
     this.cdr.detectChanges();
   }
 
-  /**
-   * Limpiar todo
-   */
   clearAll(): void {
     this.natLangInput = '';
     this.generatedPseudocode = '';
@@ -223,21 +424,14 @@ export class AppComponent implements OnInit {
     this.cdr.detectChanges();
   }
 
-  /**
-   * Copiar el pseudocódigo al portapapeles
-   */
   async copyToClipboard(): Promise<void> {
     if (!this.generatedPseudocode.trim()) {
-      this.errorMsg = '❌ No hay pseudocódigo para copiar';
-      this.cdr.detectChanges();
       return;
     }
 
     try {
       await navigator.clipboard.writeText(this.generatedPseudocode);
-      console.log('✅ Pseudocódigo copiado al portapapeles');
       
-      // Mostrar confirmación temporal
       const originalError = this.errorMsg;
       this.errorMsg = '✅ Código copiado al portapapeles';
       this.cdr.detectChanges();
@@ -247,49 +441,33 @@ export class AppComponent implements OnInit {
         this.cdr.detectChanges();
       }, 2000);
     } catch (err) {
-      console.error('❌ Error al copiar:', err);
       this.errorMsg = '❌ No se pudo copiar al portapapeles';
       this.cdr.detectChanges();
     }
   }
 
-  /**
-   * Cargar un ejemplo predefinido
-   */
-  loadExample(): void {
-    const exampleCode = `algorithm BubbleSort(array A, integer n)
-begin
-  for i <- 1 to n-1 do
-  begin
-    for j <- 1 to n-i do
-    begin
-      if A[j] > A[j+1] then
-      begin
-        temp <- A[j]
-        A[j] <- A[j+1]
-        A[j+1] <- temp
-      end
-    end
-  end
-end`;
-    
-    this.inputCode = exampleCode;
+  // 🆕 Métodos para el menú de ejemplos
+  toggleExamplesMenu(): void {
+    this.showExamplesMenu = !this.showExamplesMenu;
     this.cdr.detectChanges();
-    console.log('📋 Ejemplo cargado');
   }
 
-  /**
-   * Obtener color basado en el porcentaje de acuerdo
-   */
+  loadExample(example: AlgorithmExample): void {
+    this.inputCode = example.code;
+    this.showExamplesMenu = false;
+    this.errorMsg = null;
+    this.result = null;
+    this.llmComparison = null;
+    this.cdr.detectChanges();
+    console.log(`📋 Ejemplo cargado: ${example.name} (${example.type}, ${example.complexity})`);
+  }
+
   getAgreementColor(agreement: number): string {
-    if (agreement >= 90) return '#28a745'; // Verde
-    if (agreement >= 70) return '#ffc107'; // Amarillo
-    return '#dc3545'; // Rojo
+    if (agreement >= 90) return '#28a745';
+    if (agreement >= 70) return '#ffc107';
+    return '#dc3545';
   }
 
-  /**
-   * Obtener emoji basado en match
-   */
   getMatchEmoji(match: boolean): string {
     return match ? '✅' : '❌';
   }

@@ -68,6 +68,35 @@ class AnalyzerResult(BaseModel):
         None, 
         description="Notas o explicaciones del análisis."
     )
+    # Nuevos campos del backend analyzer
+    algorithm_kind: Optional[str] = Field(
+        None,
+        description="Tipo de algoritmo: 'recursive' o 'iterative'"
+    )
+    ir_worst: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Representación IR del peor caso"
+    )
+    ir_best: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Representación IR del mejor caso"
+    )
+    ir_avg: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Representación IR del caso promedio"
+    )
+    lines: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Análisis línea por línea del código"
+    )
+    method_used: Optional[str] = Field(
+        None,
+        description="Método utilizado para el análisis"
+    )
+    strong_bounds: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Fórmula explícita con cotas ajustadas"
+    )
 
     @field_validator('notes', mode='before')
     @classmethod
@@ -122,6 +151,35 @@ class OrchestratorResponse(BaseModel):
     notes: Optional[List[str]] = Field(
         None, 
         description="Notas del análisis completo (incluyendo correcciones LLM)."
+    )
+    # Nuevos campos del backend de análisis
+    algorithm_kind: Optional[str] = Field(
+        None,
+        description="Tipo de algoritmo: 'recursive' o 'iterative'"
+    )
+    ir_worst: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Representación IR del peor caso"
+    )
+    ir_best: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Representación IR del mejor caso"
+    )
+    ir_avg: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Representación IR del caso promedio"
+    )
+    lines: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Análisis línea por línea del código"
+    )
+    method_used: Optional[str] = Field(
+        None,
+        description="Método utilizado para el análisis (ej: master_theorem, iteration)"
+    )
+    strong_bounds: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Fórmula explícita con cotas ajustadas"
     )
 
     class Config:

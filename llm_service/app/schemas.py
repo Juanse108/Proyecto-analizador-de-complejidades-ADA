@@ -219,3 +219,71 @@ class CompareResponse(BaseModel):
     agree: bool
     deltas: List[str] = []
     next_checks: List[str] = []
+
+
+# ---------------------------------------------------------------------------
+# compare-analysis (endpoint frontend)
+# ---------------------------------------------------------------------------
+
+
+class AnalyzerResult(BaseModel):
+    """Resultado del analizador de complejidad."""
+    big_o: str
+    big_omega: str
+    theta: str
+
+
+class LLMAnalysisResult(BaseModel):
+    """Análisis de complejidad hecho por el LLM."""
+    big_o: str
+    big_omega: str
+    theta: str
+    reasoning: str
+
+
+class LineCostDetail(BaseModel):
+    """Detalle de costo de análisis línea por línea."""
+    line: int
+    kind: str
+    multiplier: str = "1"
+    analyzer_cost_worst: Optional[str] = None
+    llm_cost_worst: Optional[str] = None
+    cost_match: bool = False
+
+
+class ComparisonDetails(BaseModel):
+    """Detalles de la comparación entre resultados."""
+    big_o_match: bool
+    big_omega_match: bool
+    theta_match: bool
+    overall_agreement: float
+    differences: List[str] = []
+    recommendations: List[str] = []
+
+
+class CompareAnalysisRequest(BaseModel):
+    """
+    Petición para comparar análisis del LLM con el analizador del backend.
+    
+    Atributos:
+        pseudocode: Pseudocódigo a analizar
+        analyzer_result: Resultado del analizador del backend
+    """
+    pseudocode: str
+    analyzer_result: AnalyzerResult
+
+
+class CompareAnalysisResponse(BaseModel):
+    """
+    Respuesta de la comparación entre LLM y analizador.
+    
+    Atributos:
+        llm_analysis: Análisis independiente del LLM
+        comparison: Detalles de la comparación
+        summary: Resumen ejecutivo
+        line_analysis: Análisis línea por línea (opcional)
+    """
+    llm_analysis: LLMAnalysisResult
+    comparison: ComparisonDetails
+    summary: str
+    line_analysis: Optional[List[LineCostDetail]] = None
