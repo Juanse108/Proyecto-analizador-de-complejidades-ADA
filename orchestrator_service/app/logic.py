@@ -1,3 +1,8 @@
+# orchestrator_service/app/logic.py (CORREGIDO - líneas críticas)
+"""
+CORRECCIÓN: Variable normalized_code debe inicializarse al principio
+"""
+
 import os
 import httpx
 import re
@@ -5,7 +10,6 @@ from typing import Dict, List
 from fastapi import APIRouter, HTTPException
 import asyncio
 
-# Importaciones de esquemas internos
 from .schemas import (
     AnalyzeRequest, 
     OrchestratorResponse, 
@@ -15,174 +19,9 @@ from .schemas import (
     AnalyzerResult
 )
 
-# ---------------------------------------------------------------------------
-# CONFIGURACIÓN
-# ---------------------------------------------------------------------------
-
-LLM_URL = os.getenv("LLM_URL", "http://localhost:8003")
-PARSER_URL = os.getenv("PARSER_URL", "http://localhost:8001")
-ANALYZER_URL = os.getenv("ANALYZER_URL", "http://localhost:8002")
+# ... (configuración sin cambios) ...
 
 router = APIRouter()
-
-print(f"""
-╔════════════════════════════════════════════════════════════╗
-║         ORCHESTRATOR LOGIC INITIALIZED                     ║
-╠════════════════════════════════════════════════════════════╣
-║ LLM_URL:      {LLM_URL:<43}║
-║ PARSER_URL:   {PARSER_URL:<43}║
-║ ANALYZER_URL: {ANALYZER_URL:<43}║
-╚════════════════════════════════════════════════════════════╝
-""")
-
-# ---------------------------------------------------------------------------
-# CLIENTE LLM
-# ---------------------------------------------------------------------------
-
-class LLMClient:
-    """Cliente para comunicación con el servicio LLM."""
-    
-    def __init__(self, base_url: str, timeout: float = 60.0):
-        self.base_url = base_url
-        self.timeout = timeout
-    
-    async def validate_grammar(self, pseudocode: str) -> dict:
-        """
-        Valida y corrige pseudocódigo según la gramática.
-        
-        Endpoint: POST /llm/validate-grammar
-        Request: {pseudocode: "..."} 
-        Response: {corrected_pseudocode: "...", is_valid: bool, issues: [...]}
-        """
-        payload = {"pseudocode": pseudocode}
-        
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                print(f"📤 LLM validate-grammar: {self.base_url}/llm/validate-grammar")
-                print(f"   📝 Pseudocódigo enviado (primeros 150 chars):")
-                print(f"   {pseudocode[:150]}...")
-                
-                response = await client.post(
-                    f"{self.base_url}/llm/validate-grammar", 
-                    json=payload
-                )
-                response.raise_for_status()
-                result = response.json()
-                
-                print(f"✅ LLM validation OK")
-                print(f"   is_valid: {result.get('is_valid')}")
-                print(f"   issues: {len(result.get('issues', []))} encontrados")
-                
-                return result
-            except httpx.HTTPStatusError as e:
-                error_text = e.response.text
-                print(f"⚠️ LLM validation error ({e.response.status_code}): {error_text[:200]}")
-                return {
-                    "corrected_pseudocode": pseudocode,
-                    "is_valid": False,
-                    "issues": [f"LLM error: {error_text[:100]}"]
-                }
-            except Exception as e:
-                print(f"⚠️ LLM connection error: {str(e)}")
-                return {
-                    "corrected_pseudocode": pseudocode,
-                    "is_valid": False,
-                    "issues": [f"Connection error: {str(e)}"]
-                }
-
-llm_client = LLMClient(LLM_URL)
-
-# ---------------------------------------------------------------------------
-# FUNCIONES DE POST-PROCESAMIENTO DE PSEUDOCÓDIGO
-# ---------------------------------------------------------------------------
-
-def _fix_end_else_format(pseudocode: str) -> str:
-    """
-    Asegura que 'end else' esté en la MISMA línea, separado por UN SOLO espacio.
-    
-    Convierte:
-        end
-        else
-    En:
-        end else
-    
-    Esto es CRÍTICO para que el parser funcione correctamente.
-    
-    Args:
-        pseudocode: Pseudocódigo que puede tener 'end' y 'else' en líneas separadas.
-        
-    Returns:
-        Pseudocódigo con 'end else' correcto.
-    """
-    # Patrón: 'end' (con espacios alrededor) seguido de salto de línea y luego 'else'
-    result = re.sub(
-        r'(?m)^\s*(end)\s*\n\s*(else)\b',
-        r'\1 \2',
-        pseudocode,
-        flags=re.MULTILINE | re.IGNORECASE
-    )
-    
-    # Segundas pasada: eliminar espacios múltiples entre 'end' y 'else'
-    result = re.sub(
-        r'(?i)(end)\s{2,}(else)\b',
-        r'\1 \2',
-        result,
-        flags=re.IGNORECASE
-    )
-    
-    return result
-
-# ---------------------------------------------------------------------------
-# FUNCIONES AUXILIARES
-# ---------------------------------------------------------------------------
-
-async def _call_service(url: str, endpoint: str, payload: dict, error_msg: str) -> dict:
-    """
-    Llamar a microservicios con manejo de errores.
-    
-    Args:
-        url: URL base del servicio
-        endpoint: Endpoint a llamar (ej: /parse)
-        payload: Datos JSON a enviar
-        error_msg: Mensaje de error descriptivo
-        
-    Returns:
-        Respuesta JSON del servicio
-    """
-    full_url = f"{url}{endpoint}"
-    
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            print(f"📤 POST {full_url}")
-            print(f"   Payload keys: {list(payload.keys())}")
-            
-            response = await client.post(full_url, json=payload)
-            response.raise_for_status()
-            result = response.json()
-            
-            print(f"✅ {error_msg}: OK")
-            return result
-            
-        except httpx.HTTPStatusError as e:
-            error_detail = e.response.text
-            print(f"❌ {error_msg} error ({e.response.status_code})")
-            print(f"   Response: {error_detail[:300]}")
-            raise HTTPException(
-                status_code=500, 
-                detail=f"{error_msg}: {error_detail[:300]}"
-            )
-        except asyncio.TimeoutError:
-            print(f"❌ {error_msg}: Timeout (60s)")
-            raise HTTPException(
-                status_code=503, 
-                detail=f"Timeout en {error_msg}"
-            )
-        except Exception as e:
-            print(f"❌ {error_msg} error: {str(e)}")
-            raise HTTPException(
-                status_code=503, 
-                detail=f"Error de conexión: {str(e)}"
-            )
 
 # ---------------------------------------------------------------------------
 # ENDPOINT PRINCIPAL: ANÁLISIS COMPLETO
@@ -193,20 +32,7 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     """
     Pipeline completo de análisis de complejidad algorítmica.
     
-    Flujo:
-    1. ✅ Validación y corrección de gramática con LLM
-    2. ✅ Parsing sintáctico (Parser Service)
-    3. ✅ Análisis semántico (Parser Service)
-    4. ✅ Análisis de complejidad (Analyzer Service)
-    
-    Args:
-        req: AnalyzeRequest con pseudocódigo y objetivo
-        
-    Returns:
-        OrchestratorResponse con resultados completos
-        
-    Raises:
-        HTTPException: Si algún paso del pipeline falla
+    CORRECCIÓN: normalized_code se inicializa al principio.
     """
     print(f"\n{'='*70}")
     print(f"🚀 INICIANDO ANÁLISIS DE COMPLEJIDAD")
@@ -214,6 +40,7 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     print(f"Objetivo: {req.objective}")
     print(f"Código (primeros 200 chars):\n{req.code[:200]}...")
     
+    # ✅ CORRECCIÓN: Inicializar normalized_code con el código original
     normalized_code = req.code
     correction_notes: List[str] = []
 
@@ -236,7 +63,6 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         else:
             print(f"   ✅ CÓDIGO VÁLIDO (sin correcciones necesarias)")
         
-        # Mostrar pseudocódigo que se enviará al parser
         print(f"\n   📄 Pseudocódigo que se enviará al parser:")
         print(f"   {normalized_code[:200]}...")
             
@@ -244,7 +70,7 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         print(f"   ⚠️ Error en validación LLM (continuando): {str(e)}")
         correction_notes.append(f"LLM validation warning: {str(e)}")
 
-    # --- PASO 1.5: CORRECCIÓN DE 'end else' (POST-PROCESAMIENTO) ---
+    # --- PASO 1.5: CORRECCIÓN DE 'end else' ---
     print(f"\n[1.5/4] 🔧 CORRIGIENDO FORMATO 'end else'...")
     normalized_code = _fix_end_else_format(normalized_code)
     print(f"   ✅ Formato 'end else' normalizado")
@@ -303,10 +129,15 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
     # --- PASO 4: ANÁLISIS DE COMPLEJIDAD ---
     print(f"\n[4/4] 📊 ANÁLISIS DE COMPLEJIDAD...")
     try:
+        # ✅ CORRECCIÓN: Aquí normalized_code ya está definido
+        cost_model_with_source = {
+            "source_code": normalized_code
+        }
+        
         analysis_req = AnalyzeAstReq(
             ast=ast_sem,
             objective=req.objective,
-            cost_model=None
+            cost_model=cost_model_with_source
         )
         analysis_res = await _call_service(
             ANALYZER_URL, 
@@ -348,15 +179,141 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         theta=analysis_result.theta or "N/A",
         ir=analysis_result.ir,
         notes=all_notes if all_notes else None,
-        # Nuevos campos
         algorithm_kind=analysis_result.algorithm_kind,
         ir_worst=analysis_result.ir_worst,
         ir_best=analysis_result.ir_best,
         ir_avg=analysis_result.ir_avg,
         lines=analysis_result.lines,
         method_used=analysis_result.method_used,
-        strong_bounds=analysis_result.strong_bounds
+        strong_bounds=analysis_result.strong_bounds,
+        summations=analysis_result.summations
     )
+
+
+# ---------------------------------------------------------------------------
+# HELPER: CORRECCIÓN DE FORMATO
+# ---------------------------------------------------------------------------
+
+def _fix_end_else_format(pseudocode: str) -> str:
+    """
+    Asegura que 'end else' esté en la MISMA línea.
+    """
+    result = re.sub(
+        r'(?m)^\s*(end)\s*\n\s*(else)\b',
+        r'\1 \2',
+        pseudocode,
+        flags=re.MULTILINE | re.IGNORECASE
+    )
+    
+    result = re.sub(
+        r'(?i)(end)\s{2,}(else)\b',
+        r'\1 \2',
+        result,
+        flags=re.IGNORECASE
+    )
+    
+    return result
+
+
+# ---------------------------------------------------------------------------
+# HELPER: LLAMADAS A SERVICIOS
+# ---------------------------------------------------------------------------
+
+async def _call_service(url: str, endpoint: str, payload: dict, error_msg: str) -> dict:
+    """Llamar a microservicios con manejo de errores."""
+    full_url = f"{url}{endpoint}"
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            print(f"📤 POST {full_url}")
+            print(f"   Payload keys: {list(payload.keys())}")
+            
+            response = await client.post(full_url, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            
+            print(f"✅ {error_msg}: OK")
+            return result
+            
+        except httpx.HTTPStatusError as e:
+            error_detail = e.response.text
+            print(f"❌ {error_msg} error ({e.response.status_code})")
+            print(f"   Response: {error_detail[:300]}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"{error_msg}: {error_detail[:300]}"
+            )
+        except asyncio.TimeoutError:
+            print(f"❌ {error_msg}: Timeout (60s)")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Timeout en {error_msg}"
+            )
+        except Exception as e:
+            print(f"❌ {error_msg} error: {str(e)}")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Error de conexión: {str(e)}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# CLIENTE LLM
+# ---------------------------------------------------------------------------
+
+class LLMClient:
+    """Cliente para comunicación con el servicio LLM."""
+    
+    def __init__(self, base_url: str, timeout: float = 60.0):
+        self.base_url = base_url
+        self.timeout = timeout
+    
+    async def validate_grammar(self, pseudocode: str) -> dict:
+        """Valida y corrige pseudocódigo según la gramática."""
+        payload = {"pseudocode": pseudocode}
+        
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                print(f"📤 LLM validate-grammar: {self.base_url}/llm/validate-grammar")
+                print(f"   📝 Pseudocódigo enviado (primeros 150 chars):")
+                print(f"   {pseudocode[:150]}...")
+                
+                response = await client.post(
+                    f"{self.base_url}/llm/validate-grammar", 
+                    json=payload
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                print(f"✅ LLM validation OK")
+                print(f"   is_valid: {result.get('is_valid')}")
+                print(f"   issues: {len(result.get('issues', []))} encontrados")
+                
+                return result
+            except httpx.HTTPStatusError as e:
+                error_text = e.response.text
+                print(f"⚠️ LLM validation error ({e.response.status_code}): {error_text[:200]}")
+                return {
+                    "corrected_pseudocode": pseudocode,
+                    "is_valid": False,
+                    "issues": [f"LLM error: {error_text[:100]}"]
+                }
+            except Exception as e:
+                print(f"⚠️ LLM connection error: {str(e)}")
+                return {
+                    "corrected_pseudocode": pseudocode,
+                    "is_valid": False,
+                    "issues": [f"Connection error: {str(e)}"]
+                }
+
+
+# Instanciar cliente LLM
+LLM_URL = os.getenv("LLM_URL", "http://localhost:8003")
+PARSER_URL = os.getenv("PARSER_URL", "http://localhost:8001")
+ANALYZER_URL = os.getenv("ANALYZER_URL", "http://localhost:8002")
+
+llm_client = LLMClient(LLM_URL)
+
 
 # ---------------------------------------------------------------------------
 # HEALTH CHECK

@@ -1,14 +1,13 @@
-# app/services/combined_analyzer.py
+# core_analyzer_service/app/services/combined_analyzer.py (CORREGIDO)
 """
-combined_analyzer.py - Orquestación de análisis iterativo y recursivo
-=====================================================================
+combined_analyzer.py - Orquestación CORREGIDA
+==============================================
 
-Servicio de alto nivel que:
-
-- Clasifica el programa (iterativo / recursivo / mixto).
-- Invoca al analizador iterativo o recursivo según corresponda.
-- Construye la respuesta `analyzeAstResp` con Big-O, Big-Ω, Θ,
-  cotas fuertes y costos línea por línea.
+CAMBIOS PRINCIPALES:
+1. Integra módulo de sumatorias
+2. Usa SourceMapper para añadir campo 'text' a líneas
+3. Genera strong_bounds sin max() innecesario
+4. Añade campo 'summations' a la respuesta
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from typing import Dict, Any, List
 
 from fastapi import HTTPException
 
-from ..schemas import AnalyzeAstReq, analyzeAstResp, StrongBounds
+from ..schemas import AnalyzeAstReq, analyzeAstResp, StrongBounds, LineCost
 from ..ast_classifier import classify_algorithm
 from ..iterative.api import analyze_iterative_program, serialize_line_costs
 from ..recursive import analyze_recursive_function
@@ -28,32 +27,83 @@ from ..domain.expr import (
     big_o_str_from_expr,
     big_omega_str_from_expr,
     to_json,
-    to_explicit_formula_verbose,
+    to_explicit_formula_verbose,  # puede quedar aunque no se use
 )
+# ✅ NUEVO: Importar módulos para sumatorias y source mapping
+from ..domain.summation_builder import analyze_nested_loops, format_summation_equation
+from ..domain.source_mapper import create_source_mapper
 
 
-
-def _generate_strong_bounds(expr: Expr, name: str = "T(n)") -> StrongBounds:
+def _generate_strong_bounds_fixed(expr: Expr, name: str = "T(n)") -> StrongBounds:
     """
-    Construye la estructura de cotas fuertes a partir de una expresión IR.
+    Construye la estructura de cotas fuertes CORREGIDA.
+    
+    CAMBIO: Ya no usa to_explicit_formula_verbose que genera max(),
+    sino que construye directamente la forma polinómica.
     """
-    details = to_explicit_formula_verbose(expr)
+    # Usar to_explicit_formula en lugar de to_explicit_formula_verbose
+    from ..domain.expr import to_explicit_formula
+
+    formula_str = to_explicit_formula(expr)
+
+    # Extraer información de términos manualmente
+    terms = []
+    dominant_term_str = None
+    constant_val = 0
+
+    # Si es Add, extraer cada término
+    from ..domain.expr import Add, Const, Pow, Sym, Mul
+
+    if isinstance(expr, Add):
+        for term in expr.terms:
+            if isinstance(term, Const):
+                constant_val = term.k
+            elif isinstance(term, Pow):
+                terms.append(
+                    {
+                        "expr": to_explicit_formula(term),
+                        "degree": (term.exp, 0),
+                    }
+                )
+                if dominant_term_str is None:
+                    dominant_term_str = to_explicit_formula(term)
+            elif isinstance(term, Mul):
+                # Calcular degree del Mul
+                deg = 0
+                for factor in term.factors:
+                    if isinstance(factor, Pow):
+                        deg += factor.exp
+                    elif isinstance(factor, Sym):
+                        deg += 1
+                terms.append(
+                    {
+                        "expr": to_explicit_formula(term),
+                        "degree": (deg, 0),
+                    }
+                )
+                if dominant_term_str is None:
+                    dominant_term_str = to_explicit_formula(term)
+    elif isinstance(expr, Pow):
+        terms.append(
+            {
+                "expr": to_explicit_formula(expr),
+                "degree": (expr.exp, 0),
+            }
+        )
+        dominant_term_str = to_explicit_formula(expr)
+    elif isinstance(expr, Const):
+        constant_val = expr.k
 
     return StrongBounds(
-        formula=f"{name} = {details['formula']}",
-        terms=details["terms"],
-        dominant_term=details.get("dominant"),
-        constant=details.get("constant", 0),
+        formula=f"{name} = {formula_str}",
+        terms=terms,
+        dominant_term=dominant_term_str,
+        constant=constant_val,
     )
 
 
 def _select_recursive_proc(ast: Dict[str, Any], metadata) -> Dict[str, Any]:
-    """
-    Selecciona el primer procedimiento marcado como recursivo en la metadata.
-
-    Esto es crucial: el analizador recursivo trabaja sobre un nodo `proc`,
-    no sobre el AST completo del programa.
-    """
+    """Selecciona el primer procedimiento recursivo."""
     body: List[Dict[str, Any]] = ast.get("body", [])
 
     recursive_procs = [
@@ -79,17 +129,19 @@ def _select_recursive_proc(ast: Dict[str, Any], metadata) -> Dict[str, Any]:
 
 def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
     """
-    Analiza la complejidad de un algoritmo a partir de su AST.
-
-    Flujo:
-
-    1. Clasificar el programa (iterativo / recursivo / mixto).
-    2. Delegar al analizador iterativo o recursivo.
-    3. Calcular Big-O, Big-Ω y Θ.
-    4. Generar cotas fuertes.
-    5. Construir `analyzeAstResp`.
+    Analiza la complejidad de un algoritmo - VERSIÓN CORREGIDA.
+    
+    CAMBIOS:
+    1. Genera sumatorias explícitas
+    2. Añade texto a cada línea usando SourceMapper
+    3. strong_bounds sin max() innecesario
+    4. Devuelve campo 'summations' para la UI
     """
     ast = req.ast
+
+    # ✅ NUEVO: Obtener pseudocódigo original si está disponible
+    pseudocode_source = req.cost_model.get("source_code") if req.cost_model else None
+    source_mapper = create_source_mapper(pseudocode_source) if pseudocode_source else None
 
     # 1) Clasificación global
     metadata = classify_algorithm(ast)
@@ -98,20 +150,55 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
     # CASO ITERATIVO
     # ---------------------------------------------------------------
     if metadata.algorithm_kind == "iterative":
-        # ProgramCost: worst, best, avg, lines (internas)
         result = analyze_iterative_program(ast)
 
         big_o = big_o_str_from_expr(result.worst)
         big_omega = big_omega_str_from_expr(result.best)
         theta = big_o if big_o == big_omega else None
 
-        strong_bounds = _generate_strong_bounds(result.worst, name="T(n)")
+        # ✅ NUEVO: Generar strong_bounds corregido
+        strong_bounds = _generate_strong_bounds_fixed(result.worst, name="T(n)")
 
-        # LineCostInternal -> LineCost (modelo Pydantic)
+        # ✅ NUEVO: Generar sumatorias explícitas
+        from ..domain.ast_utils import extract_main_body
+
+        main_body = extract_main_body(ast)
+        summation_analysis = analyze_nested_loops(main_body)
+
+        # Formatear ecuaciones de sumatorias (texto plano, multilinea)
+        summations = {
+            "worst": format_summation_equation(
+                "worst",
+                summation_analysis.worst_summation,
+                summation_analysis.worst_simplified,
+                summation_analysis.worst_polynomial,
+            ),
+            "best": format_summation_equation(
+                "best",
+                summation_analysis.best_summation,
+                summation_analysis.best_simplified,
+                summation_analysis.best_polynomial,
+            ),
+        }
+        if summation_analysis.avg_summation:
+            summations["avg"] = format_summation_equation(
+                "avg",
+                summation_analysis.avg_summation,
+                summation_analysis.avg_simplified,
+                summation_analysis.avg_polynomial,
+            )
+
+        # ✅ NUEVO: Añadir texto a líneas usando SourceMapper
         public_lines = serialize_line_costs(result.lines)
+        if source_mapper:
+            lines_as_dicts = [lc.model_dump() for lc in public_lines]
+            lines_as_dicts = source_mapper.annotate_line_costs(lines_as_dicts)
+            public_lines = [LineCost(**lc_dict) for lc_dict in lines_as_dicts]
 
-        # Método usado: para parte iterativa
         method_used = getattr(result, "method_used", "iteration")
+
+        # Notas sin duplicar sumatorias (la UI tiene una sección propia para ellas)
+        notes_list = [f"Análisis iterativo. Objetivo: {req.objective}."]
 
         return analyzeAstResp(
             algorithm_kind="iterative",
@@ -123,39 +210,32 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
             ir_best=to_json(result.best),
             ir_avg=to_json(result.avg) if result.avg else None,
             lines=public_lines,
-            notes=f"Análisis iterativo. Objetivo: {req.objective}.",
+            notes=" | ".join(notes_list),
             method_used=method_used,
+            summations=summations,  # 👈 IMPORTANTE: se expone summations para el front
         )
 
     # ---------------------------------------------------------------
     # CASO RECURSIVO
     # ---------------------------------------------------------------
     if metadata.algorithm_kind == "recursive":
-        # Seleccionar el `proc` recursivo correcto
         proc = _select_recursive_proc(ast, metadata)
-
-        # Ahora sí: analizar ESA función
         rec_result: RecursiveAnalysisResult = analyze_recursive_function(proc)
 
         big_o = big_o_str_from_expr(rec_result.big_o)
         big_omega = big_omega_str_from_expr(rec_result.big_omega)
         theta = big_o_str_from_expr(rec_result.theta) if rec_result.theta else None
 
-        strong_bounds = _generate_strong_bounds(rec_result.big_o, name="T(n)")
+        strong_bounds = _generate_strong_bounds_fixed(rec_result.big_o, name="T(n)")
 
         notes = [f"Análisis recursivo: {rec_result.explanation}"]
 
         if rec_result.recurrence:
             rec: RecurrenceRelation = rec_result.recurrence
-            notes.append(
-                f"Recurrencia detectada: T(n) = {rec.a}T(n/{rec.b}) + f(n)"
-            )
+            notes.append(f"Recurrencia detectada: T(n) = {rec.a}T(n/{rec.b}) + f(n)")
             if rec_result.master_theorem_case:
-                notes.append(
-                    f"Teorema Maestro caso {rec_result.master_theorem_case}"
-                )
+                notes.append(f"Teorema Maestro caso {rec_result.master_theorem_case}")
 
-        # Método usado viene del analizador recursivo
         method_used = getattr(rec_result, "method_used", None)
 
         return analyzeAstResp(
@@ -173,20 +253,13 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
         )
 
     # ---------------------------------------------------------------
-    # CASO MIXTO (iterativo + recursivo)
+    # CASO MIXTO
     # ---------------------------------------------------------------
     if metadata.algorithm_kind == "mixed":
-        # 1) Análisis iterativo sobre todo el programa
         iter_result = analyze_iterative_program(ast)
-
-        # 2) Seleccionar procedimiento recursivo principal
         proc = _select_recursive_proc(ast, metadata)
-
-        # 3) Análisis recursivo sobre ese proc
         rec_result: RecursiveAnalysisResult = analyze_recursive_function(proc)
 
-        # 4) Combinar costos en el IR:
-        #    T_total(n) = T_iter(n) + T_rec(n)
         total_worst_expr = add(iter_result.worst, rec_result.big_o)
         total_best_expr = add(iter_result.best, rec_result.big_omega)
 
@@ -194,7 +267,7 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
         big_omega = big_omega_str_from_expr(total_best_expr)
         theta = big_o if big_o == big_omega else None
 
-        strong_bounds = _generate_strong_bounds(total_worst_expr, name="T(n)")
+        strong_bounds = _generate_strong_bounds_fixed(total_worst_expr, name="T(n)")
 
         notes = ["Análisis mixto (iterativo + recursivo)."]
         notes.append(
@@ -217,11 +290,13 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
                     f"Teorema Maestro (parte recursiva) caso {rec_result.master_theorem_case}"
                 )
 
-        # Para las líneas detalladas, mostramos las del análisis iterativo,
-        # que es donde tenemos breakdown línea por línea.
+        # Ojo: en mixto usamos las líneas iterativas
         public_lines = serialize_line_costs(iter_result.lines)
+        if source_mapper:
+            lines_as_dicts = [lc.model_dump() for lc in public_lines]
+            lines_as_dicts = source_mapper.annotate_line_costs(lines_as_dicts)
+            public_lines = [LineCost(**lc_dict) for lc_dict in lines_as_dicts]
 
-        # Combinar métodos usados, si existen
         iter_method = getattr(iter_result, "method_used", "iteration")
         rec_method = getattr(rec_result, "method_used", None)
         if rec_method:
@@ -237,9 +312,8 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
             strong_bounds=strong_bounds,
             ir_worst=to_json(total_worst_expr),
             ir_best=to_json(total_best_expr),
-            ir_avg=None,  # si no estás calculando caso promedio
+            ir_avg=None,
             lines=public_lines,
             notes=" | ".join(notes),
             method_used=method_used,
         )
-

@@ -97,6 +97,10 @@ class AnalyzerResult(BaseModel):
         None,
         description="Fórmula explícita con cotas ajustadas"
     )
+    summations: Optional[Dict[str, str]] = Field(
+        None,
+        description="Sumatorias explícitas por caso (worst, best, avg)"
+    )
 
     @field_validator('notes', mode='before')
     @classmethod
@@ -180,6 +184,10 @@ class OrchestratorResponse(BaseModel):
     strong_bounds: Optional[Dict[str, Any]] = Field(
         None,
         description="Fórmula explícita con cotas ajustadas"
+    )
+    summations: Optional[Dict[str, str]] = Field(
+        None,
+        description="Sumatorias explícitas por caso (worst, best, avg)"
     )
 
     class Config:

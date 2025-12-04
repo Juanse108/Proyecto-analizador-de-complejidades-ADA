@@ -1,4 +1,4 @@
-import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClientModule } from '@angular/common/http';
@@ -285,10 +285,15 @@ end`
   constructor(
     private orchestratorService: OrchestratorService,
     private geminiService: GeminiService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private ngZone: NgZone
   ) {}
 
   ngOnInit(): void {
+    // Exponer el componente para debugging
+    (window as any).appComponent = this;
+    console.log('💡 Para debugging, ejecuta en consola: appComponent.debugState()');
+    
     this.orchestratorService.healthCheck().subscribe({
       next: (response) => {
         this.isServiceReady = true;
@@ -371,8 +376,13 @@ end`
   }
 
   async onCompareLLM(): Promise<void> {
+    console.log('🔄 onCompareLLM iniciado');
+    console.log('Timestamp:', new Date().toISOString());
+    
     if (!this.result) {
+      console.error('❌ No hay resultado');
       this.comparisonError = '❌ No hay resultado del analyzer para comparar';
+      this.isComparingLLM = false;
       this.cdr.detectChanges();
       return;
     }
@@ -380,28 +390,74 @@ end`
     this.isComparingLLM = true;
     this.comparisonError = null;
     this.llmComparison = null;
+    console.log('🔄 Estado inicial configurado');
+    console.log('isComparingLLM:', this.isComparingLLM);
     this.cdr.detectChanges();
+    console.log('🔄 Primer detectChanges ejecutado (loading = true)');
 
-    try {
-      const comparison = await this.geminiService.compareAnalysis(
-        this.result.normalized_code,
-        {
-          big_o: this.result.big_o,
-          big_omega: this.result.big_omega,
-          theta: this.result.theta ?? undefined
+    // Usar Zone para asegurar que todo ocurra dentro de Angular
+    this.ngZone.run(async () => {
+      try {
+        console.log('📤 Iniciando llamada a compareAnalysis...');
+        console.log('📦 Payload:', {
+          codigo_length: this.result?.normalized_code?.length,
+          big_o: this.result?.big_o,
+          big_omega: this.result?.big_omega,
+          theta: this.result?.theta
+        });
+        
+        const comparison = await this.geminiService.compareAnalysis(
+          this.result!.normalized_code,
+          {
+            big_o: this.result!.big_o,
+            big_omega: this.result!.big_omega,
+            theta: this.result!.theta ?? undefined
+          }
+        );
+
+        console.log('✅ Respuesta recibida de compareAnalysis');
+        console.log('Response keys:', Object.keys(comparison));
+        console.log('Response completa:', JSON.stringify(comparison).substring(0, 500) + '...');
+        
+        // Asignar respuesta
+        console.log('🔄 Asignando this.llmComparison...');
+        this.llmComparison = comparison;
+        console.log('✅ this.llmComparison asignado');
+        console.log('llmComparison truthy?', !!this.llmComparison);
+        
+        // Actualizar UI
+        this.isComparingLLM = false;
+        console.log('🔄 isComparingLLM = false, ejecutando detectChanges...');
+        this.cdr.detectChanges();
+        console.log('✅ detectChanges ejecutado (loading = false, mostrar respuesta)');
+        
+        // Hacer scroll a la sección de comparación
+        setTimeout(() => {
+          console.log('📍 Iniciando búsqueda de elemento data-comparison-section...');
+          const element = document.querySelector('[data-comparison-section]');
+          if (element) {
+            console.log('✅ Elemento encontrado, haciendo scroll...');
+            element.scrollIntoView({ behavior: 'smooth' });
+          } else {
+            console.warn('⚠️ Elemento data-comparison-section NO encontrado en DOM');
+            console.log('DOM actual:', document.body.innerHTML.substring(0, 200));
+          }
+        }, 100); // Reducido a 100ms
+
+      } catch (err: any) {
+        console.error('❌ Error capturado en onCompareLLM:', err);
+        console.error('Error message:', err.message);
+        console.error('Error stack:', err.stack);
+        if (err.error) {
+          console.error('Error.error (HTTP):', err.error);
         }
-      );
-
-      this.llmComparison = comparison;
-      this.cdr.detectChanges();
-
-    } catch (err: any) {
-      this.comparisonError = `❌ Error en comparación: ${err.message || 'Error desconocido'}`;
-      this.cdr.detectChanges();
-    } finally {
-      this.isComparingLLM = false;
-      this.cdr.detectChanges();
-    }
+        
+        this.comparisonError = `❌ Error en comparación: ${err.message || 'Error desconocido'}`;
+        this.isComparingLLM = false;
+        this.cdr.detectChanges();
+        console.log('✅ Error manejado, UI actualizada');
+      }
+    });
   }
 
   clearGenerated(): void {
@@ -470,5 +526,22 @@ end`
 
   getMatchEmoji(match: boolean): string {
     return match ? '✅' : '❌';
+  }
+
+  // 🆕 Método para debugging
+  debugState(): void {
+    console.log('=== 🐛 DEBUG STATE ===');
+    console.log('isComparingLLM:', this.isComparingLLM);
+    console.log('llmComparison present:', !!this.llmComparison);
+    console.log('llmComparison value:', this.llmComparison);
+    console.log('comparisonError:', this.comparisonError);
+    console.log('result present:', !!this.result);
+    
+    const element = document.querySelector('[data-comparison-section]');
+    console.log('data-comparison-section in DOM:', !!element);
+    
+    const button = document.querySelector('button[aria-label*="Comparar"]');
+    console.log('Botón "Comparar" presente:', !!button);
+    console.log('=== FIN DEBUG ===');
   }
 }
