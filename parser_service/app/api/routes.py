@@ -1,6 +1,4 @@
-"""
-routes.py — Endpoints del microservicio de parser
-=================================================
+"""Endpoints del microservicio de parser.
 
 Responsabilidad única: manejar HTTP requests/responses.
 """
@@ -12,9 +10,6 @@ from ..services.parser_service import get_parser_service
 from ..services.semantic_analyzer import run_semantic
 from ..domain.ast_models import Program
 
-# ============================================================================
-# APLICACIÓN
-# ============================================================================
 
 app = FastAPI(
     title="Parser Service",
@@ -23,19 +18,15 @@ app = FastAPI(
 )
 
 
-# ============================================================================
-# ENDPOINTS
-# ============================================================================
-
 @app.post("/parse", response_model=ParseResp)
 def parse(req: ParseReq) -> ParseResp:
-    """
-    Realiza el análisis sintáctico del pseudocódigo.
-
+    """Realiza el análisis sintáctico del pseudocódigo.
+    
+    Args:
+        req: Solicitud con el código a parsear
+    
     Returns:
-        ParseResp con:
-        - ok=True + ast si éxito
-        - ok=False + errors si fallo
+        ParseResp con ok=True + ast si éxito, ok=False + errors si fallo
     """
     try:
         parser_service = get_parser_service()
@@ -48,7 +39,6 @@ def parse(req: ParseReq) -> ParseResp:
         )
 
     except ValueError as e:
-        # Error de sintaxis/parsing
         return ParseResp(
             ok=False,
             ast=None,
@@ -56,7 +46,6 @@ def parse(req: ParseReq) -> ParseResp:
         )
 
     except Exception as e:
-        # Error inesperado
         return ParseResp(
             ok=False,
             ast=None,
@@ -66,22 +55,19 @@ def parse(req: ParseReq) -> ParseResp:
 
 @app.post("/semantic", response_model=SemResp)
 def semantic(req: SemReq) -> SemResp:
-    """
-    Realiza la normalización y verificación semántica del AST.
-
+    """Realiza la normalización y verificación semántica del AST.
+    
+    Args:
+        req: Solicitud con el AST a analizar
+    
     Returns:
-        SemResp con:
-        - ast_sem: AST normalizado
-        - issues: advertencias/errores
+        SemResp con ast_sem (AST normalizado) e issues (advertencias/errores)
     """
     try:
-        # Validar AST de entrada
         program = Program.model_validate(req.ast)
 
-        # Análisis semántico
         ast_norm, issues = run_semantic(program)
 
-        # Normalizar issues al formato de schema
         issues_out = []
         for it in issues:
             if isinstance(it, IssueSchema):

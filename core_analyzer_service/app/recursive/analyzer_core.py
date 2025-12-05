@@ -9,24 +9,32 @@ from .characteristic_equation import build_characteristic_explanation
 
 
 def analyze_recursive_function(proc: dict, param_name: str = "n") -> RecursiveAnalysisResult:
-    """
-    Analiza una función recursiva y devuelve su complejidad asintótica
-    usando diferentes métodos: patrón conocido (QuickSort), ecuación característica,
-    método de la iteración y teorema maestro.
+    """Analiza una función recursiva y determina su complejidad asintótica.
+    
+    Utiliza diferentes métodos según el tipo de recurrencia:
+    - Patrones conocidos (QuickSort)
+    - Ecuación característica para recurrencias lineales
+    - Método de la iteración
+    - Teorema Maestro para divide y vencerás
+    
+    Args:
+        proc: Diccionario representando el procedimiento recursivo
+        param_name: Nombre del parámetro que representa el tamaño (por defecto: "n")
+        
+    Returns:
+        Resultado del análisis incluyendo big-O, big-Ω, Θ y explicación
     """
     func_name = (proc.get("name") or "").upper()
 
-    # 1) Detección de QuickSort
     if "QUICK" in func_name and "SORT" in func_name:
         nlogn = mul(sym("n"), log(sym("n"), const(2)))
         n_squared = mul(sym("n"), sym("n"))
         
         from ..domain.recurrence import RecurrenceRelation
         
-        # 🆕 Recurrencia PEOR CASO (pivote desbalanceado)
         rec_worst = RecurrenceRelation(
             a=1,
-            b=1,  # T(n-1), no T(n/2)
+            b=1,
             c=0,
             d=0,
             f_expr=sym("n"),
@@ -38,7 +46,6 @@ def analyze_recursive_function(proc: dict, param_name: str = "n") -> RecursiveAn
             "T(1) = d"
         )
         
-        # 🆕 Recurrencia MEJOR/PROMEDIO CASO (pivote balanceado)
         rec_best = RecurrenceRelation(
             a=2,
             b=2,
@@ -64,21 +71,19 @@ def analyze_recursive_function(proc: dict, param_name: str = "n") -> RecursiveAn
         )
         
         return RecursiveAnalysisResult(
-            recurrence=rec_worst,  # Usamos la del peor caso como referencia
-            big_o=n_squared,       # Peor caso
-            big_omega=nlogn,       # Mejor caso
-            theta=nlogn,           # Caso promedio
+            recurrence=rec_worst,
+            big_o=n_squared,
+            big_omega=nlogn,
+            theta=nlogn,
             method_used="case_based_analysis",
             master_theorem_case=None,
             explanation=explanation,
             recurrence_equation=f"{rec_worst.equation_text}\n\n{rec_best.equation_text}",
         )
 
-    # 2) Extraer recurrencia genérica T(n) = a T(n/b) + c T(n-1) + d T(n-2) + f(n)
     rec = extract_recurrence(proc, param_name)
 
     if not rec:
-        # Fallback: no se pudo extraer recurrencia
         return RecursiveAnalysisResult(
             recurrence=None,
             big_o=sym("n"),
@@ -90,9 +95,7 @@ def analyze_recursive_function(proc: dict, param_name: str = "n") -> RecursiveAn
             recurrence_equation="No se pudo inferir una ecuación de recurrencia precisa a partir del código."
         )
 
-    # 3) Recurrencias lineales: T(n) = c T(n-1) + d T(n-2) + f(n)
     if rec.b == 1:
-        print("Detectada recursión lineal (orden 1 u orden 2)")
         lin_expr, explanation = solve_linear_recurrence(rec)
         if lin_expr is not None:
             char_explanation = build_characteristic_explanation(rec, lin_expr)
@@ -114,18 +117,12 @@ def analyze_recursive_function(proc: dict, param_name: str = "n") -> RecursiveAn
                 method_used="characteristic_equation + iteration",
                 master_theorem_case=0,
                 explanation=full_explanation,
-                recurrence_equation=rec.equation_text,  # 🆕 AGREGAR AQUÍ
+                recurrence_equation=rec.equation_text,
             )
         
-    # 4) Divide & conquer limpio: T(n) = a T(n/b) + f(n)
-    #    (sin términos T(n-1), T(n-2)), aplicamos Teorema Maestro + iteración.
     if rec.c == 0 and rec.b > 1:
-        print("Aplicando Teorema Maestro…")
         result, case, explanation = solve_master_theorem(rec)
 
-        print(f"Resultado: Caso {case} → {explanation}")
-
-        # Método de la iteración sobre T(n) = a T(n/b) + f(n)
         iteration_explanation = build_iteration_explanation(rec, result)
         explanation = (
             explanation
@@ -155,12 +152,10 @@ def analyze_recursive_function(proc: dict, param_name: str = "n") -> RecursiveAn
             method_used="master_theorem + iteration",
             master_theorem_case=case,
             explanation=explanation,
-            recurrence_equation=rec.equation_text,  # ✅ YA ESTÁ
+            recurrence_equation=rec.equation_text,
         )
 
-    # 5) Fallback extra para rec.b == 1 cuando solve_linear_recurrence falló
     if rec.b == 1:
-        print("Detectada recursión lineal, pero no se pudo resolver con ecuación característica.")
         result, case, explanation = solve_master_theorem(rec)
         
         equation_text = rec.equation_text if hasattr(rec, 'equation_text') and rec.equation_text else \
@@ -177,9 +172,6 @@ def analyze_recursive_function(proc: dict, param_name: str = "n") -> RecursiveAn
             recurrence_equation=equation_text
         )
 
-    # 6) Último recurso: estimación conservadora
-    print("Recurrencia compleja, usando fallback conservador")
-    
     equation_text = rec.equation_text if hasattr(rec, 'equation_text') and rec.equation_text else \
                    "No se pudo generar la ecuación de recurrencia con precisión."
     

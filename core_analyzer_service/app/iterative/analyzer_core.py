@@ -1,12 +1,9 @@
-# core_analyzer_service/app/iterative/analyzer_core.py (CORREGIDO)
-"""
-analyzer_core.py - Análisis iterativo corregido
-===============================================
+"""Análisis de complejidad de algoritmos iterativos.
 
-CAMBIOS PRINCIPALES:
-1. Manejo correcto de ramas if para worst/best/avg
-2. Evitar uso de alt() que genera max() innecesario
-3. Propagar información de caso (worst/best/avg) a través del análisis
+Provee funcionalidad central de análisis para algoritmos iterativos incluyendo:
+- Manejo apropiado de ramas if para casos peor/mejor/promedio
+- Propagación de casos de análisis a través del análisis
+- Soporte para diferentes patrones de bucles
 """
 
 from typing import List, Tuple, Dict, Any
@@ -35,25 +32,34 @@ from .patterns_while import (
 )
 
 def branch_weight(lines: List[LineCostInternal]) -> int:
-    """
-    Heurística de peso de una rama de if.
-
-    Por ahora: número de líneas de la rama.
-    Es suficiente para distinguir, por ejemplo, 3 asignaciones vs 1.
+    """Cálculo heurístico del peso de una rama if.
+    
+    Actualmente utiliza el número de líneas como heurística simple.
+    
+    Args:
+        lines: Lista de costos de línea de la rama
+        
+    Returns:
+        Peso calculado (número de líneas)
     """
     return sum(1 for _ in lines)
 
 
 
 class AnalysisCase(Enum):
-    """Tipo de caso que se está analizando."""
+    """Tipo de caso siendo analizado."""
     WORST = "worst"
     BEST = "best"
     AVG = "avg"
 
 
 def env_record_assign(env: Dict[str, Tuple[str, Any]], stmt: dict) -> None:
-    """Registra asignaciones en el entorno."""
+    """Registra asignaciones en el entorno.
+    
+    Args:
+        env: Entorno con variables y sus valores
+        stmt: Sentencia de asignación a registrar
+    """
     if stmt.get("kind") != "assign":
         return
     tgt = stmt.get("target")
@@ -74,7 +80,16 @@ def analyze_stmt_list(
         multiplier: Expr,
         env: Dict[str, Tuple[str, Any]],
 ) -> Tuple[Expr, Expr, Expr, List[LineCostInternal]]:
-    """Analiza lista de sentencias."""
+    """Analiza una lista de sentencias.
+    
+    Args:
+        stmts: Lista de sentencias a analizar
+        multiplier: Multiplicador de costo actual
+        env: Entorno con variables
+        
+    Returns:
+        Tupla con (costo_peor, costo_mejor, costo_promedio, líneas)
+    """
     worst_costs: List[Expr] = []
     best_costs: List[Expr] = []
     avg_costs: List[Expr] = []
@@ -102,7 +117,16 @@ def analyze_stmt(
         multiplier: Expr,
         env: Dict[str, Tuple[str, Any]],
 ) -> Tuple[Expr, Expr, Expr, List[LineCostInternal]]:
-    """Analiza una sentencia individual."""
+    """Analiza una sentencia individual.
+    
+    Args:
+        stmt: Sentencia a analizar
+        multiplier: Multiplicador de costo actual
+        env: Entorno con variables
+        
+    Returns:
+        Tupla con (costo_peor, costo_mejor, costo_promedio, líneas)
+    """
     kind = stmt.get("kind")
 
     if kind == "assign":
@@ -138,7 +162,15 @@ def analyze_stmt(
 
 
 def analyze_assign(stmt: dict, multiplier: Expr) -> Tuple[Expr, Expr, Expr, List[LineCostInternal]]:
-    """Analiza asignación."""
+    """Analiza una sentencia de asignación.
+    
+    Args:
+        stmt: Sentencia de asignación
+        multiplier: Multiplicador de costo actual
+        
+    Returns:
+        Tupla con (costo_peor, costo_mejor, costo_promedio, líneas)
+    """
     line = get_line(stmt)
     c = cost_assign()
     total = mul(multiplier, c)
@@ -161,7 +193,16 @@ def analyze_for(
         multiplier: Expr,
         env: Dict[str, Tuple[str, Any]],
 ) -> Tuple[Expr, Expr, Expr, List[LineCostInternal]]:
-    """Analiza bucle FOR."""
+    """Analiza un bucle FOR.
+    
+    Args:
+        stmt: Sentencia FOR
+        multiplier: Multiplicador de costo actual
+        env: Entorno con variables
+        
+    Returns:
+        Tupla con (costo_peor, costo_mejor, costo_promedio, líneas)
+    """
     line = get_line(stmt)
     start = stmt.get("start")
     end = stmt.get("end")
@@ -198,24 +239,27 @@ def analyze_if(
     multiplier: Expr,
     env: Dict[str, Tuple[str, Any]],
 ) -> Tuple[Expr, Expr, Expr, List[LineCostInternal]]:
-    """
-    Analiza condicional IF.
-
+    """Analiza una sentencia condicional IF.
+    
     Estrategia:
-    - Analiza por separado la rama THEN y la rama ELSE.
-    - WORST: toma la rama con grado mayor; si el grado es igual, usa una heurística
-      basada en el número de líneas (mayor peso = peor rama). La rama no elegida
-      se marca con cost_worst = 0.
-    - BEST: toma la rama con grado menor; si el grado es igual, usa la heurística
-      inversa (menor peso = mejor rama). La rama no elegida se marca con cost_best = 0.
-    - AVG: usa una combinación simple de ambas ramas (suma) como aproximación.
+    - Analiza ramas THEN y ELSE por separado
+    - PEOR CASO: toma la rama con mayor grado; si son iguales, usa heurística de líneas
+    - MEJOR CASO: toma la rama con menor grado; si son iguales, usa heurística inversa
+    - PROMEDIO: usa combinación simple de ambas ramas como aproximación
+    
+    Args:
+        stmt: Sentencia IF
+        multiplier: Multiplicador de costo actual
+        env: Entorno con variables
+        
+    Returns:
+        Tupla con (costo_peor, costo_mejor, costo_promedio, líneas)
     """
 
     line = get_line(stmt)
     then_body = stmt.get("then_body", [])
     else_body = stmt.get("else_body", [])
 
-    # Analizar ambas ramas
     then_w, then_b, then_a, then_lines = analyze_stmt_list(
         then_body, multiplier, dict(env)
     )
@@ -228,82 +272,63 @@ def analyze_if(
         else_w = else_b = else_a = const(0)
         else_lines: List[LineCostInternal] = []
 
-    # ---------- WORST CASE ----------
     then_deg = degree(then_w)
     else_deg = degree(else_w)
 
     if then_deg > else_deg:
-        # Rama THEN es más cara
         total_w = cost_seq(cost_compare(), then_w)
-        # Marcar líneas ELSE como no ejecutadas en worst
         for lc in else_lines:
             lc.cost_worst = const(0)
 
     elif else_deg > then_deg:
-        # Rama ELSE es más cara
         total_w = cost_seq(cost_compare(), else_w)
-        # Marcar líneas THEN como no ejecutadas en worst
         for lc in then_lines:
             lc.cost_worst = const(0)
 
     else:
-        # Mismo grado: usar heurística de número de líneas
         then_weight = branch_weight(then_lines)
         else_weight = branch_weight(else_lines)
 
         if then_weight >= else_weight:
-            # THEN se considera peor
             total_w = cost_seq(cost_compare(), then_w)
             for lc in else_lines:
                 lc.cost_worst = const(0)
         else:
-            # ELSE se considera peor
             total_w = cost_seq(cost_compare(), else_w)
             for lc in then_lines:
                 lc.cost_worst = const(0)
 
-    # ---------- BEST CASE ----------
     then_deg_b = degree(then_b)
     else_deg_b = degree(else_b)
 
     if then_deg_b < else_deg_b:
-        # Rama THEN es más barata
         total_b = cost_seq(cost_compare(), then_b)
-        # Marcar líneas ELSE como no ejecutadas en best
         for lc in else_lines:
             lc.cost_best = const(0)
 
     elif else_deg_b < then_deg_b:
-        # Rama ELSE es más barata
         total_b = cost_seq(cost_compare(), else_b)
-        # Marcar líneas THEN como no ejecutadas en best
         for lc in then_lines:
             lc.cost_best = const(0)
 
     else:
-        # Mismo grado: usar heurística inversa (menos líneas = mejor rama)
         then_weight = branch_weight(then_lines)
         else_weight = branch_weight(else_lines)
 
         if then_weight <= else_weight:
-            # THEN se considera mejor
             total_b = cost_seq(cost_compare(), then_b)
             for lc in else_lines:
                 lc.cost_best = const(0)
         else:
-            # ELSE se considera mejor
             total_b = cost_seq(cost_compare(), else_b)
             for lc in then_lines:
                 lc.cost_best = const(0)
 
-    # ---------- AVG CASE ----------
-    # Aproximación simple: combinación de ambas ramas
     total_a = cost_seq(
         cost_compare(),
         add(then_a, else_a),
     )
 
-    # Coste de la propia línea del IF (comparación)
     if_line = LineCostInternal(
         line=line,
         kind="if",
@@ -322,12 +347,20 @@ def analyze_while(
         multiplier: Expr,
         env: Dict[str, Tuple[str, Any]],
 ) -> Tuple[Expr, Expr, Expr, List[LineCostInternal]]:
-    """Analiza bucle WHILE."""
+    """Analiza un bucle WHILE.
+    
+    Args:
+        stmt: Sentencia WHILE
+        multiplier: Multiplicador de costo actual
+        env: Entorno con variables
+        
+    Returns:
+        Tupla con (costo_peor, costo_mejor, costo_promedio, líneas)
+    """
     line = get_line(stmt)
     cond = stmt.get("cond", {})
     body = stmt.get("body", [])
 
-    # Detectar patrones especiales (binary search, etc.)
     bs_iters = detect_binary_search_while(cond, body, env)
     if bs_iters is not None:
         body_multiplier = mul(multiplier, bs_iters)
@@ -348,7 +381,6 @@ def analyze_while(
         )
         return total_w, total_b, total_a, [while_line] + body_lines
 
-    # ... resto del código de analyze_while sin cambios ...
     ctrl_var = None
     if isinstance(cond, dict) and cond.get("kind") == "binop":
         if is_var(cond.get("left")):
@@ -397,7 +429,6 @@ def analyze_while(
     total_b = body_b
     total_a = body_a
 
-    # Patrones especiales para best case
     if is_adaptive_sort_while(cond, body):
         n_sym = sym("n")
         n2 = mul(n_sym, n_sym)
@@ -428,7 +459,16 @@ def analyze_repeat(
         multiplier: Expr,
         env: Dict[str, Tuple[str, Any]],
 ) -> Tuple[Expr, Expr, Expr, List[LineCostInternal]]:
-    """Analiza bucle REPEAT."""
+    """Analiza un bucle REPEAT.
+    
+    Args:
+        stmt: Sentencia REPEAT
+        multiplier: Multiplicador de costo actual
+        env: Entorno con variables
+        
+    Returns:
+        Tupla con (costo_peor, costo_mejor, costo_promedio, líneas)
+    """
     line = get_line(stmt)
     body = stmt.get("body", [])
 

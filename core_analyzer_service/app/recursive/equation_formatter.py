@@ -1,6 +1,4 @@
-"""
-equation_formatter.py - Formatea ecuaciones de recurrencia legibles
-===================================================================
+"""Formato de ecuaciones de recurrencia legibles.
 
 Convierte los parámetros de RecurrenceRelation en ecuaciones matemáticas
 claras y correctas para mostrar en la UI.
@@ -10,15 +8,20 @@ from ..domain.recurrence import RecurrenceRelation
 from ..domain.expr import Expr, Const, Sym, Pow, Log, Mul, Add
 
 def format_f_expr(f: Expr) -> str:
-    """
-    Convierte una expresión simbólica a string matemático legible.
+    """Convierte una expresión simbólica a string matemático legible.
+    
+    Args:
+        f: Expresión a formatear
+        
+    Returns:
+        String con la representación matemática
     
     Ejemplos:
-    - Const(1) → "c"
-    - Sym("n") → "n"
-    - Sym("2^n") → "2^n"  # 🆕 CASO ESPECIAL
-    - Mul(Const(2), Sym("n")) → "2n"
-    - Pow(Sym("n"), 2) → "n²"
+        - Const(1) → "c"
+        - Sym("n") → "n"
+        - Sym("2^n") → "2^n"
+        - Mul(Const(2), Sym("n")) → "2n"
+        - Pow(Sym("n"), 2) → "n²"
     """
     if f is None:
         return "c"
@@ -29,9 +32,8 @@ def format_f_expr(f: Expr) -> str:
         return f"c·{f.k}"
     
     if isinstance(f, Sym):
-        # 🆕 NUEVO: Manejar símbolos especiales como "2^n", "φ^n"
         if "^" in f.name or f.name in ["2^n", "φ^n", "log"]:
-            return f.name  # Devolver tal cual
+            return f.name
         return f"c·{f.name}"
     
     if isinstance(f, Pow):
@@ -51,7 +53,6 @@ def format_f_expr(f: Expr) -> str:
             return f"c·log_{f.base}({arg})"
     
     if isinstance(f, Mul):
-        # Extraer coeficiente y términos
         coef = 1
         terms = []
         for factor in f.factors:
@@ -69,9 +70,7 @@ def format_f_expr(f: Expr) -> str:
         parts = [format_f_expr(t) for t in f.terms]
         return f"({' + '.join(parts)})"
     
-    # Fallback: convertir a string y limpiar
     s = str(f)
-    # Limpiar representaciones de Python
     s = s.replace("Sym(name='", "").replace("')", "")
     s = s.replace("Const(k=", "").replace(")", "")
     return s if s else "f(n)"

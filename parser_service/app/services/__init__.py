@@ -1,10 +1,4 @@
-
-# ============================================================================
-# parser_service/app/services/__init__.py
-# ============================================================================
-"""
-Services layer - Business logic orchestration
-"""
+"""Services layer - Business logic orchestration."""
 
 from .parser_service import ParserService, get_parser_service
 from .ast_builder import BuildAST, build_ast_from_tree

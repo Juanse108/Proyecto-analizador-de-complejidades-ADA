@@ -58,9 +58,8 @@ export class RecursionTreeService {
     table?: TraceTable;
     svg?: string;
   }> {
-    // 🆕 IMPORTANTE: Si hay execution_trace, es iterativo (no usar cache para esto)
+    // IMPORTANTE: Si hay execution_trace, es iterativo
     if (response.execution_trace && response.execution_trace.steps && response.execution_trace.steps.length > 0) {
-      console.log('✅ [analyzeComplexity] execution_trace detectado → ITERATIVO');
       return {
         type: 'iterative',
         table: this.generateTraceTable(response.big_o, response)
@@ -70,21 +69,15 @@ export class RecursionTreeService {
     // Generar clave única para cache
     const cacheKey = `${response.normalized_code}-${response.big_o}-${response.algorithm_kind}`;
     
-    console.log(`🔑 [analyzeComplexity] Cache key: ${cacheKey.substring(0, 50)}...`);
-    
     // Si ya está en cache, devolver inmediatamente
     if (this.cache.has(cacheKey)) {
-      console.log('✅ [analyzeComplexity] Resultado en cache, reutilizando...');
       return this.cache.get(cacheKey)!;
     }
 
     // Si hay una petición pendiente para esta misma clave, esperar a que termine
     if (this.pendingRequests.has(cacheKey)) {
-      console.log('⏳ [analyzeComplexity] Petición ya en curso, esperando...');
       return this.pendingRequests.get(cacheKey)!;
     }
-
-    console.log('🆕 [analyzeComplexity] Nueva petición, iniciando análisis...');
 
     // Crear y registrar la promesa antes de ejecutar la lógica
     const analysisPromise = this.performAnalysis(response, cacheKey);
@@ -113,13 +106,6 @@ export class RecursionTreeService {
     const hasRecurrence = !!response.recurrence_equation;
     const methodUsed = (response.method_used || '').toLowerCase();
 
-    console.log('🔍 [analyzeComplexity] INICIANDO DETECCIÓN');
-    console.log('📝 Código:', response.normalized_code?.substring(0, 60) + '...');
-    console.log('🎯 BigO:', bigO);
-    console.log('📐 recurrence_equation:', response.recurrence_equation);
-    console.log('🔧 method_used:', methodUsed);
-    console.log('🏷️ algorithm_kind:', response.algorithm_kind);
-
     // DETECCIÓN MEJORADA: Buscar características de recursión
     const hasCallStatement = normalized.includes('call ');
     const hasSelfReference = /\b(fibonacci|factorial|quicksort|mergesort|binary.{0,10}search|hanoi)\b/i.test(response.normalized_code || '');
@@ -147,26 +133,9 @@ export class RecursionTreeService {
       (hasIterativeKeyword && !hasRecurrence && !hasSelfReference) ||
       methodUsed.includes('summation');
 
-    console.log('✅ ANÁLISIS DE INDICADORES:');
-    console.log('   ├─ hasCallStatement:', hasCallStatement);
-    console.log('   ├─ hasSelfReference:', hasSelfReference);
-    console.log('   ├─ hasRecursivePattern:', hasRecursivePattern);
-    console.log('   ├─ hasRecurrence:', hasRecurrence);
-    console.log('   ├─ hasIterativeKeyword:', hasIterativeKeyword);
-    console.log('   ├─ bigO:', bigO);
-    console.log('   ├─ isRecursive (FINAL):', isRecursive);
-    console.log('   └─ isIterative (FINAL):', isIterative);
-
     if (isRecursive && !isIterative) {
-      console.log('🚀 ✅ DECISIÓN: RECURSIVO → Generando árbol SVG...');
       try {
         const llmResponse = await this.generateTreeWithLLM(response.normalized_code || '', bigO, response);
-        
-        console.log('✅ Respuesta LLM:', {
-          hasTree: !!llmResponse.tree,
-          hasSvg: !!llmResponse.svg,
-          svgLength: (llmResponse.svg || '').length
-        });
         
         const result = {
           type: 'recursive' as const,
@@ -178,7 +147,6 @@ export class RecursionTreeService {
         this.cache.set(cacheKey, result);
         return result;
       } catch (error) {
-        console.error('❌ Error en LLM:', error);
         const fallbackTree = this.generateRecursionTree(normalized, bigO, response);
         const fallbackResult = {
           type: 'recursive' as const,
@@ -188,7 +156,6 @@ export class RecursionTreeService {
         return fallbackResult;
       }
     } else if (isIterative && !isRecursive) {
-      console.log('🔁 ✅ DECISIÓN: ITERATIVO → Generando tabla...');
       const iterativeResult = {
         type: 'iterative' as const,
         table: this.generateTraceTable(bigO, response)
@@ -197,16 +164,14 @@ export class RecursionTreeService {
       return iterativeResult;
     }
 
-    console.log('❓ ❌ DECISIÓN: DESCONOCIDO');
-    console.log('   → No se encontraron indicadores claros');
     const unknownResult = { type: 'unknown' as const };
     this.cache.set(cacheKey, unknownResult);
     return unknownResult;
   }
 
   /**
-   * 🆕 Genera el árbol de recursión usando el LLM
-   * Envía el pseudocódigo y complejidad al LLM para obtener un análisis detallado
+   * Genera el árbol de recursión usando el LLM.
+   * Envía el pseudocódigo y complejidad al LLM para obtener un análisis detallado.
    */
   private async generateTreeWithLLM(
     pseudocode: string,
@@ -222,8 +187,6 @@ export class RecursionTreeService {
       };
 
       const url = `${this.llmServiceUrl}/analyze-recursion-tree`;
-      console.log('📤 [LLM Call] URL:', url);
-      console.log('📤 [LLM Call] Payload:', JSON.stringify(payload, null, 2));
       
       // Agregar timeout de 30 segundos
       const timeoutPromise = new Promise<LLMRecursionTreeResponse>((_, reject) => 
@@ -234,11 +197,7 @@ export class RecursionTreeService {
         this.http.post<LLMRecursionTreeResponse>(url, payload)
       );
       
-      console.log('⏳ Esperando respuesta del LLM (max 30s)...');
       const result = await Promise.race([httpPromise, timeoutPromise]);
-
-      console.log('✅ [LLM Response] Respuesta recibida correctamente');
-      console.log('✅ [LLM Response] Árbol extraído:', JSON.stringify(result.tree, null, 2));
       
       if (!result || !result.tree) {
         throw new Error('Respuesta del LLM vacía o sin árbol');
@@ -246,17 +205,12 @@ export class RecursionTreeService {
       
       return result;
     } catch (error) {
-      console.error('❌ [LLM Error] Error crítico al obtener árbol:', error);
-      if (error instanceof Error) {
-        console.error('❌ [LLM Error] Mensaje:', error.message);
-        console.error('❌ [LLM Error] Stack:', error.stack);
-      }
       throw error;
     }
   }
 
   private generateRecursionTree(code: string, bigO: string, response: AnalyzeResponse): RecursionTree {
-    // 🆕 Detección específica por algoritmo
+    // Detección específica por algoritmo
     
     // 1. MergeSort
     if (code.includes('mergesort') || code.includes('merge_sort')) {

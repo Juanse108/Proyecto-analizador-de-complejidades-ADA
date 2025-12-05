@@ -92,11 +92,8 @@ export class OrchestratorService {
       objective: objective
     };
 
-    console.log('📤 [Orchestrator] Enviando al backend:', payload);
-
     return this.http.post<AnalyzeResponse>(`${this.apiUrl}/analyze`, payload).pipe(
       catchError((error) => {
-        console.error('❌ [Orchestrator] Error en respuesta:', error);
         return this.handleError(error);
       })
     );

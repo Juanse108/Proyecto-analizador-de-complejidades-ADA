@@ -1,6 +1,4 @@
-"""
-lark_parser.py — Configuración y gestión del parser LALR
-========================================================
+"""Configuración y gestión del parser LALR.
 
 Responsabilidad: configurar Lark y parsear texto a parse tree.
 """
@@ -22,9 +20,8 @@ class LarkParserConfig:
 
 
 class PseudocodeParser:
-    """
-    Parser de pseudocódigo basado en Lark.
-
+    """Parser de pseudocódigo basado en Lark.
+    
     Singleton pattern para evitar recargar la gramática.
     """
 
@@ -50,15 +47,14 @@ class PseudocodeParser:
         )
 
     def parse(self, code: str):
-        """
-        Parsea pseudocódigo a parse tree.
-
+        """Parsea pseudocódigo a parse tree.
+        
         Args:
             code: Pseudocódigo a parsear
-
+        
         Returns:
             Lark Tree
-
+        
         Raises:
             LarkError: Si hay errores de sintaxis
         """

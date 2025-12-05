@@ -1,11 +1,9 @@
-"""
-ast_builder.py — Construcción del AST desde el parse tree
-=========================================================
+"""Construcción del AST desde el parse tree.
 
 Responsabilidad: transformar el parse tree de Lark en AST del dominio.
 
-Nota: Este archivo contiene el Transformer BuildAST extraído de parser.py
-pero ahora con responsabilidades más claras y métodos auxiliares separados.
+Nota: Este archivo contiene el Transformer BuildAST con responsabilidades
+claras y métodos auxiliares separados.
 """
 
 from typing import List, Optional
@@ -14,26 +12,31 @@ from lark import Transformer, v_args, Token
 from ..domain.ast_models import *
 
 
-# ============================================================================
-# UTILIDADES DE CONSTRUCCIÓN
-# ============================================================================
-
 class ASTBuilderUtils:
     """Métodos auxiliares para construcción del AST."""
 
     @staticmethod
     def extract_location(tok: Token) -> SrcLoc:
-        """Extrae ubicación de un token."""
+        """Extrae ubicación de un token.
+        
+        Args:
+            tok: Token de Lark
+            
+        Returns:
+            SrcLoc con línea y columna
+        """
         return SrcLoc(line=tok.line, column=tok.column)
 
     @staticmethod
     def fold_binary_ops(first, rest_pairs):
-        """
-        Pliega operaciones binarias asociativas de izquierda a derecha.
-
+        """Pliega operaciones binarias asociativas de izquierda a derecha.
+        
         Args:
             first: Primer operando
-            rest_pairs: [op, operando, op, operando, ...]
+            rest_pairs: Lista [op, operando, op, operando, ...]
+            
+        Returns:
+            Nodo BinOp anidado
         """
         node = first
         ops = rest_pairs[::2]
@@ -44,7 +47,14 @@ class ASTBuilderUtils:
 
     @staticmethod
     def normalize_relational_op(op_token: Token) -> str:
-        """Normaliza operadores relacionales a su forma estándar."""
+        """Normaliza operadores relacionales a su forma estándar.
+        
+        Args:
+            op_token: Token con el operador
+            
+        Returns:
+            String con el operador normalizado (==, !=, <, <=, >, >=)
+        """
         rel_map = {
             "EQ": "==",
             "NE": "!=",
@@ -57,19 +67,21 @@ class ASTBuilderUtils:
 
     @staticmethod
     def filter_tokens(*items):
-        """Filtra tokens y devuelve solo nodos AST."""
+        """Filtra tokens y devuelve solo nodos AST.
+        
+        Args:
+            items: Lista de items mezclados (tokens y nodos)
+            
+        Returns:
+            Lista solo con nodos AST
+        """
         return [it for it in items if not isinstance(it, Token)]
 
 
-# ============================================================================
-# TRANSFORMER PRINCIPAL
-# ============================================================================
-
 @v_args(inline=True)
 class BuildAST(Transformer):
-    """
-    Transformer de Lark → AST del dominio.
-
+    """Transformer de Lark → AST del dominio.
+    
     Cada método corresponde a una regla de la gramática.
     """
 
@@ -77,12 +89,15 @@ class BuildAST(Transformer):
         super().__init__()
         self.utils = ASTBuilderUtils()
 
-    # ------------------------------------------------------------------------
-    # PROGRAMA Y TOPLEVEL
-    # ------------------------------------------------------------------------
-
     def program(self, *items):
-        """Nodo raíz del programa."""
+        """Nodo raíz del programa.
+        
+        Args:
+            items: Lista de unidades toplevel
+            
+        Returns:
+            Nodo Program
+        """
         body = []
         for it in items:
             if it is None or (isinstance(it, Token) and it.type == "SEP"):
@@ -94,11 +109,25 @@ class BuildAST(Transformer):
         return Program(body=body)
 
     def top_unit(self, item):
-        """Unidad toplevel (proc, class, block)."""
+        """Unidad toplevel.
+        
+        Args:
+            item: Procedimiento, clase o bloque
+            
+        Returns:
+            El item sin modificar
+        """
         return item
 
     def stmt_list(self, *stmts):
-        """Lista de sentencias."""
+        """Lista de sentencias.
+        
+        Args:
+            stmts: Sentencias a aplanar
+            
+        Returns:
+            Lista aplanada de sentencias
+        """
         out = []
         for s in stmts:
             if s is None or (isinstance(s, Token) and s.type == "SEP"):
@@ -110,7 +139,14 @@ class BuildAST(Transformer):
         return out
 
     def line(self, *items):
-        """Línea individual."""
+        """Línea individual.
+        
+        Args:
+            items: Items de la línea
+            
+        Returns:
+            Lista de items procesados
+        """
         out = []
         for it in items:
             if it is None or (isinstance(it, Token) and it.type == "SEP"):
@@ -121,12 +157,15 @@ class BuildAST(Transformer):
                 out.append(it)
         return out
 
-    # ------------------------------------------------------------------------
-    # BLOQUES
-    # ------------------------------------------------------------------------
-
     def block(self, *items):
-        """Bloque BEGIN...END."""
+        """Bloque BEGIN...END.
+        
+        Args:
+            items: Tokens BEGIN/END y sentencias
+            
+        Returns:
+            Nodo Block
+        """
         begin_tok = None
         stmts = []
 
@@ -155,39 +194,46 @@ class BuildAST(Transformer):
                 out.append(it)
         return out
 
-    # ------------------------------------------------------------------------
-    # LITERALES
-    # ------------------------------------------------------------------------
-
     def NUMBER(self, tok):
+        """Literal numérico.
+        
+        Args:
+            tok: Token con el número
+            
+        Returns:
+            Nodo Num
+        """
         return Num(value=int(tok.value))
 
     def true(self, _):
+        """Literal true."""
         return Bool(value=True)
 
     def false(self, _):
+        """Literal false."""
         return Bool(value=False)
 
     def NULL(self, _):
+        """Literal NULL."""
         return NullLit()
 
-    # ------------------------------------------------------------------------
-    # EXPRESIONES
-    # ------------------------------------------------------------------------
-
     def or_expr(self, first, *rest):
+        """Expresión OR."""
         return self.utils.fold_binary_ops(first, rest)
 
     def and_expr(self, first, *rest):
+        """Expresión AND."""
         return self.utils.fold_binary_ops(first, rest)
 
     def not_expr(self, *items):
+        """Expresión NOT."""
         if len(items) == 1:
             return items[0]
         expr = next(x for x in items if not isinstance(x, Token))
         return UnOp(op="not", expr=expr)
 
     def rel_expr(self, *items):
+        """Expresión relacional."""
         if len(items) == 1:
             return items[0]
         left, op_tok, right = items
@@ -195,18 +241,17 @@ class BuildAST(Transformer):
         return BinOp(op=op, left=left, right=right)
 
     def sum(self, first, *rest):
+        """Expresión de suma/resta."""
         return self.utils.fold_binary_ops(first, rest)
 
     def prod(self, first, *rest):
+        """Expresión de multiplicación/división."""
         return self.utils.fold_binary_ops(first, rest)
 
     def neg(self, *items):
+        """Expresión de negación."""
         expr = next(x for x in items if not isinstance(x, Token))
         return UnOp(op="-", expr=expr)
-
-    # ------------------------------------------------------------------------
-    # LVALUES
-    # ------------------------------------------------------------------------
 
     def lvalue(self, *items):
         """Construye LValue (var/index/field)."""
@@ -238,9 +283,7 @@ class BuildAST(Transformer):
     def subscript_list(self, *items):
         return list(items)
 
-    # ------------------------------------------------------------------------
     # SENTENCIAS
-    # ------------------------------------------------------------------------
 
     def assign(self, target, assign_tok, expr):
         return Assign(
@@ -352,9 +395,7 @@ class BuildAST(Transformer):
             loc=self.utils.extract_location(call_tok)
         )
 
-    # ------------------------------------------------------------------------
     # FUNCIONES Y PROCEDIMIENTOS
-    # ------------------------------------------------------------------------
 
     def func_call(self, name_tok, *maybe_args):
         """Llamada a función en expresión."""
@@ -394,9 +435,7 @@ class BuildAST(Transformer):
                     body = it
         return Proc(name=str(name_tok), params=params, body=body)
 
-    # ------------------------------------------------------------------------
     # ELEMENTOS IGNORADOS
-    # ------------------------------------------------------------------------
 
     def expr_stmt(self, expr_node):
         """Sentencias de expresión (ignoradas)."""

@@ -151,9 +151,9 @@ export class SanitizeHtmlPipe implements PipeTransform {
         </div>
       </div>
 
-      <!-- 🆕 Tabla de Seguimiento de Ejecución (Iterativo) -->
+      <!-- Tabla de Seguimiento de Ejecución (Iterativo) -->
       <div *ngIf="response.algorithm_kind === 'iterative'" class="trace-container">
-        <h3>📊 Seguimiento de Ejecución del Pseudocódigo</h3>
+        <h3>Seguimiento de Ejecución del Pseudocódigo</h3>
         
         <!-- Mostrar traza si existe -->
         <ng-container *ngIf="response.execution_trace && response.execution_trace.steps && response.execution_trace.steps.length > 0; else noTrace">
@@ -208,10 +208,10 @@ export class SanitizeHtmlPipe implements PipeTransform {
         <!-- Fallback si no hay traza -->
         <ng-template #noTrace>
           <div class="trace-hint" style="background: #fff3e0; border-left-color: #ff9800; color: #e65100;">
-            ⚠️ El seguimiento de ejecución no está disponible para este algoritmo en este momento.
+            El seguimiento de ejecución no está disponible para este algoritmo.
           </div>
           <div class="trace-description">
-            <p><strong>💡 ¿Qué debería mostrar aquí?</strong></p>
+            <p><strong>¿Qué debería mostrar aquí?</strong></p>
             <p>Una tabla de seguimiento paso a paso que muestra:</p>
             <ul style="margin: 10px 0; padding-left: 20px;">
               <li>Estado de variables en cada iteración (i, j, n, etc.)</li>
@@ -564,7 +564,7 @@ export class SanitizeHtmlPipe implements PipeTransform {
       background: #555;
     }
 
-    /* 🆕 Tabla de Seguimiento de Ejecución (Iterativo) */
+    /* Estilos para Tabla de Seguimiento de Ejecución */
     .trace-container {
       margin-top: 30px;
       padding: 20px;
@@ -1045,8 +1045,6 @@ export class ComplexityVisualizerComponent implements OnInit, OnChanges, AfterVi
     this.isLoadingTree = false;
     this.cdr.detectChanges(); // Forzar renderizado de estado limpio
 
-    console.log('🔄 [updateAnalysis] Estado limpiado, esperando análisis...');
-
     try {
       // Mostrar loading si es recursivo
       const normalized = (this.response.normalized_code || '').toLowerCase();
@@ -1062,7 +1060,6 @@ export class ComplexityVisualizerComponent implements OnInit, OnChanges, AfterVi
 
       // Actualizar tipo de complejidad (ahora es async para recursivos)
       const analysis = await this.recursionTreeService.analyzeComplexity(this.response);
-      console.log('✅ [updateAnalysis] Análisis completado:', analysis.type);
       
       this.complexityType = analysis.type;
       this.recursionTree = analysis.tree || null;
@@ -1070,16 +1067,7 @@ export class ComplexityVisualizerComponent implements OnInit, OnChanges, AfterVi
       this.treeSvg = analysis.svg || null;
       this.treeDescription = analysis.tree?.description || null;
       this.isLoadingTree = false;
-      
-      console.log('📊 [updateAnalysis] Datos asignados:', {
-        type: this.complexityType,
-        hasTree: !!this.recursionTree,
-        hasSvg: !!this.treeSvg,
-        hasDescription: !!this.treeDescription,
-        svgLength: (this.treeSvg || '').length
-      });
     } catch (error) {
-      console.error('❌ [updateAnalysis] Error:', error);
       this.complexityType = 'unknown';
       this.isLoadingTree = false;
     }
@@ -1139,7 +1127,6 @@ export class ComplexityVisualizerComponent implements OnInit, OnChanges, AfterVi
       container.style.alignItems = 'center';
       container.style.justifyContent = 'center';
     } catch (error) {
-      console.error('Error renderizando LaTeX:', error);
       // Fallback: mostrar texto plano
       const summationObj = summation as any;
       container.textContent = summationObj.text || JSON.stringify(summation);
@@ -1272,7 +1259,7 @@ export class ComplexityVisualizerComponent implements OnInit, OnChanges, AfterVi
   }
 
   /**
-   * 🆕 Formatea el objeto de variables para mostrar en la tabla de traza
+   * Formatea el objeto de variables para mostrar en la tabla de traza.
    */
   formatVariables(variables: { [key: string]: any }): string {
     if (!variables || Object.keys(variables).length === 0) {
@@ -1285,7 +1272,7 @@ export class ComplexityVisualizerComponent implements OnInit, OnChanges, AfterVi
   }
 
   /**
-   * 🆕 Obtiene el tamaño de ejemplo usado en la traza
+   * Obtiene el tamaño de ejemplo usado en la traza.
    */
   getExampleSize(): number {
     if (!this.response?.execution_trace) return 5;

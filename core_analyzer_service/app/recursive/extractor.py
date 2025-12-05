@@ -1,3 +1,9 @@
+"""Extracción de relaciones de recurrencia de funciones recursivas.
+
+Analiza el cuerpo de funciones recursivas para identificar patrones de
+recurrencia como divide-y-vencerás, Fibonacci, y recurrencias lineales.
+"""
+
 from typing import List, Dict, Any, Tuple, Optional, Set
 
 from ..domain import Expr, sym, const, Pow, Sym
@@ -5,6 +11,15 @@ from ..domain.recurrence import RecurrenceRelation
 
 
 def count_calls_in_expr(expr: Dict[str, Any], func_name: str) -> int:
+    """Cuenta llamadas recursivas dentro de una expresión.
+    
+    Args:
+        expr: Expresión a analizar
+        func_name: Nombre de la función recursiva
+        
+    Returns:
+        Número de llamadas recursivas encontradas
+    """
     if not isinstance(expr, dict):
         return 0
 
@@ -35,6 +50,15 @@ def count_calls_in_expr(expr: Dict[str, Any], func_name: str) -> int:
 
 
 def count_calls_in_stmts(stmts: List[Dict[str, Any]], func_name: str) -> int:
+    """Cuenta llamadas recursivas en una lista de sentencias.
+    
+    Args:
+        stmts: Lista de sentencias a analizar
+        func_name: Nombre de la función recursiva
+        
+    Returns:
+        Número de llamadas recursivas encontradas
+    """
     total = 0
 
     for stmt in stmts or []:
@@ -66,6 +90,12 @@ def count_calls_in_stmts(stmts: List[Dict[str, Any]], func_name: str) -> int:
 
 
 def collect_divisors_expr(expr: Dict[str, Any], divisors: Set[int]) -> None:
+    """Recopila divisores usados en expresiones (para detectar divide-y-vencerás).
+    
+    Args:
+        expr: Expresión a analizar
+        divisors: Conjunto donde se agregarán los divisores encontrados
+    """
     if not isinstance(expr, dict):
         return
 
@@ -99,6 +129,12 @@ def collect_divisors_expr(expr: Dict[str, Any], divisors: Set[int]) -> None:
 
 
 def collect_divisors_stmts(stmts: List[Dict[str, Any]], divisors: Set[int]) -> None:
+    """Recopila divisores usados en sentencias.
+    
+    Args:
+        stmts: Lista de sentencias a analizar
+        divisors: Conjunto donde se agregarán los divisores encontrados
+    """
     for stmt in stmts or []:
         if not isinstance(stmt, dict):
             continue
@@ -131,6 +167,15 @@ def collect_divisors_stmts(stmts: List[Dict[str, Any]], divisors: Set[int]) -> N
 
 
 def extract_all_calls(body: List[Dict[str, Any]], func_name: str) -> List[Tuple[int, int]]:
+    """Extrae todas las llamadas recursivas y sus parámetros.
+    
+    Args:
+        body: Cuerpo de la función a analizar
+        func_name: Nombre de la función recursiva
+        
+    Returns:
+        Lista de tuplas (a, b) donde a es el número de llamadas y b el divisor
+    """
     a = count_calls_in_stmts(body, func_name)
 
     divisors: Set[int] = set()
@@ -139,15 +184,22 @@ def extract_all_calls(body: List[Dict[str, Any]], func_name: str) -> List[Tuple[
     b = min(divisors) if divisors else 1
 
     if a == 0:
-        print("   Llamadas detectadas: []")
         return []
 
     calls = [(a, b)]
-    print(f"   Llamadas detectadas (a,b): {calls}")
     return calls
 
 
 def count_nested_loops(stmts: List[Dict[str, Any]], depth: int = 0) -> int:
+    """Cuenta la profundidad máxima de bucles anidados.
+    
+    Args:
+        stmts: Lista de sentencias a analizar
+        depth: Profundidad actual
+        
+    Returns:
+        Profundidad máxima de anidamiento
+    """
     max_depth = depth
 
     for stmt in stmts or []:
@@ -175,6 +227,15 @@ def count_nested_loops(stmts: List[Dict[str, Any]], depth: int = 0) -> int:
 
 
 def has_external_function_call(stmts: List[Dict[str, Any]], func_name: str) -> bool:
+    """Verifica si hay llamadas a funciones externas (no recursivas).
+    
+    Args:
+        stmts: Lista de sentencias a analizar
+        func_name: Nombre de la función recursiva actual
+        
+    Returns:
+        True si se encuentra una llamada externa
+    """
     for stmt in stmts or []:
         if not isinstance(stmt, dict):
             continue
@@ -207,15 +268,28 @@ def has_external_function_call(stmts: List[Dict[str, Any]], func_name: str) -> b
 
 
 def extract_fibonacci_pattern(body: List[Dict[str, Any]], func_name: str) -> Optional[Tuple[int, int, int, int]]:
-    """
-    Detecta si hay un patrón Fibonacci: dos llamadas recursivas con argumentos n-1 y n-2.
-    Retorna (a, b, c, d) donde:
-      - a=1, b=1 para T(n-1)
-      - c=1, d=2 para T(n-2)
-    O None si no se detecta el patrón.
+    """Detecta si hay un patrón Fibonacci en el código.
+    
+    Busca dos llamadas recursivas con argumentos n-1 y n-2.
+    
+    Args:
+        body: Cuerpo de la función a analizar
+        func_name: Nombre de la función recursiva
+    
+    Returns:
+        Tupla (a, b, c, d) donde a=1, b=1 para T(n-1) y c=1, d=2 para T(n-2),
+        o None si no se detecta el patrón
     """
     def extract_recursion_args(expr: Dict[str, Any], func_name: str) -> List[int]:
-        """Extrae los argumentos de llamadas recursivas como offsets (e.g., 1 para n-1, 2 para n-2)."""
+        """Extrae argumentos de llamadas recursivas como offsets.
+        
+        Args:
+            expr: Expresión a analizar
+            func_name: Nombre de la función recursiva
+            
+        Returns:
+            Lista de offsets (ej: 1 para n-1, 2 para n-2)
+        """
         if not isinstance(expr, dict):
             return []
         
@@ -254,7 +328,15 @@ def extract_fibonacci_pattern(body: List[Dict[str, Any]], func_name: str) -> Opt
         return results
     
     def scan_stmts_for_fibonacci(stmts: List[Dict[str, Any]], func_name: str) -> List[int]:
-        """Recorre los statements en busca de argumentos recursivos."""
+        """Recorre sentencias buscando argumentos recursivos.
+        
+        Args:
+            stmts: Lista de sentencias a analizar
+            func_name: Nombre de la función recursiva
+            
+        Returns:
+            Lista de offsets encontrados
+        """
         offsets = []
         
         for stmt in stmts or []:
@@ -283,10 +365,8 @@ def extract_fibonacci_pattern(body: List[Dict[str, Any]], func_name: str) -> Opt
         
         return offsets
     
-    # Buscar argumentos recursivos
     offsets = scan_stmts_for_fibonacci(body, func_name)
     
-    # Detectar patrón Fibonacci: exactamente 2 llamadas con offsets 1 y 2
     if len(offsets) == 2 and sorted(offsets) == [1, 2]:
         return (1, 1, 1, 2)  # a=1, b=1, c=1, d=2
     
@@ -294,67 +374,59 @@ def extract_fibonacci_pattern(body: List[Dict[str, Any]], func_name: str) -> Opt
 
 
 def estimate_non_recursive_work(body: List[Dict[str, Any]], func_name: str) -> Expr:
+    """Estima el trabajo no recursivo (f(n)) de una función recursiva.
+    
+    Args:
+        body: Cuerpo de la función a analizar
+        func_name: Nombre de la función recursiva
+        
+    Returns:
+        Expresión representando la complejidad del trabajo no recursivo
+    """
     loop_depth = count_nested_loops(body)
     has_external_call = has_external_function_call(body, func_name)
 
     if has_external_call:
         result = sym("n")
-        print(f"   f(n): Llamada externa detectada → O(n)")
-
     elif loop_depth >= 3:
         result = Pow(Sym("n"), 3)
-        print(f"   f(n): {loop_depth} bucles anidados → O(n³)")
-
     elif loop_depth == 2:
         result = Pow(Sym("n"), 2)
-        print(f"   f(n): 2 bucles anidados → O(n²)")
-
     elif loop_depth == 1:
         result = sym("n")
-        print(f"   f(n): 1 bucle → O(n)")
-
     else:
         result = const(1)
-        print(f"   f(n): Sin bucles → O(1)")
 
     return result
 
 
 def extract_recurrence(proc: dict, param_name: str = "n") -> Optional[RecurrenceRelation]:
-    """
-    Extrae la relación de recurrencia de un procedimiento recursivo.
+    """Extrae la relación de recurrencia de un procedimiento recursivo.
+    
+    Args:
+        proc: Diccionario representando el procedimiento
+        param_name: Nombre del parámetro que representa el tamaño
+        
+    Returns:
+        Objeto RecurrenceRelation o None si no se puede extraer
     """
     func_name = proc.get("name", "")
     body = proc.get("body", [])
 
-    print(f"\n{'=' * 70}")
-    print(f"ANALIZANDO FUNCION: {func_name}")
-    print(f"{'=' * 70}")
-
-    # 🆕 PASO 1: Intentar detectar Fibonacci específicamente
     fibonacci_pattern = extract_fibonacci_pattern(body, func_name)
     if fibonacci_pattern:
         a, b, c, d = fibonacci_pattern
-        print(f"   ✓ Patrón Fibonacci detectado: T(n-1) + T(n-2)")
         f_expr = estimate_non_recursive_work(body, func_name)
         rec = RecurrenceRelation(a=a, b=b, c=c, d=d, f_expr=f_expr)
         
         from .equation_formatter import format_recurrence_equation
         rec.equation_text = format_recurrence_equation(rec)
         
-        print(f"\n📐 Ecuación de recurrencia formateada:")
-        print(rec.equation_text)
-        print(f"   a={rec.a}, b={rec.b}, c={rec.c}, d={rec.d}")
-        print(f"   f(n)={rec.f_expr}")
-        print(f"{'=' * 70}\n")
-        
         return rec
 
-    # 🆕 PASO 2: Si no es Fibonacci, usar la lógica genérica
     calls = extract_all_calls(body, func_name)
 
     if not calls:
-        print(f"No se detectaron llamadas recursivas")
         return None
 
     f_expr = estimate_non_recursive_work(body, func_name)
@@ -366,27 +438,12 @@ def extract_recurrence(proc: dict, param_name: str = "n") -> Optional[Recurrence
         if b < 0:
             b = abs(b)
         rec = RecurrenceRelation(a=a, b=b, f_expr=f_expr)
-        
-        if b > 1:
-            print(f"\nRecurrencia divide & conquer: T(n) = {a}T(n/{b}) + f(n)")
-        else:
-            print(f"\nRecurrencia lineal: T(n) = {a}T(n-1) + f(n)")
-
     else:
-        # Múltiples llamadas (más de 2)
         total_a = sum(abs(a) for a, _ in calls)
         avg_b = abs(calls[0][1])
         rec = RecurrenceRelation(a=total_a, b=avg_b, f_expr=f_expr)
-        print(f"\nRecurrencia múltiple simplificada: T(n) = {total_a}T(n/{avg_b}) + f(n)")
 
-    # Generar la ecuación de recurrencia como texto
     from .equation_formatter import format_recurrence_equation
     rec.equation_text = format_recurrence_equation(rec)
-    
-    print(f"\n📐 Ecuación de recurrencia formateada:")
-    print(rec.equation_text)
-    print(f"   a={rec.a}, b={rec.b}, c={rec.c}, d={rec.d}")
-    print(f"   f(n)={rec.f_expr}")
-    print(f"{'=' * 70}\n")
 
     return rec

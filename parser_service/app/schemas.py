@@ -1,25 +1,17 @@
-"""
-schemas.py — Modelos de datos (Pydantic) para las rutas del microservicio
-=========================================================================
+"""Esquemas de entrada/salida para el microservicio parser.
 
-Este módulo define los **esquemas de entrada y salida (request/response)**
-utilizados por el microservicio del parser y analizador semántico.
+Define los modelos de petición y respuesta para los endpoints:
+- `/parse`: parseo de pseudocódigo a AST
+- `/semantic`: análisis semántico sobre AST
 
-Los modelos están basados en `pydantic.BaseModel` para garantizar:
-- Validación automática de tipos.
-- Serialización/Deserialización a JSON.
-- Documentación automática en Swagger/OpenAPI.
-
-
+Utiliza Pydantic para validación automática y serialización JSON.
 """
 
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 
-# ---------------------------------------------------------------------------
-# 1️. PETICIONES (Request Models)
-# ---------------------------------------------------------------------------
+# MODELOS DE PETICIÓN
 
 class ParseReq(BaseModel):
     """
@@ -42,9 +34,7 @@ class SemReq(BaseModel):
     ast: Dict[str, Any]
 
 
-# ---------------------------------------------------------------------------
-# 2️. MODELOS AUXILIARES
-# ---------------------------------------------------------------------------
+# MODELOS AUXILIARES
 
 class Issue(BaseModel):
     """
@@ -60,9 +50,7 @@ class Issue(BaseModel):
     where: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
-# 3️. RESPUESTAS (Response Models)
-# ---------------------------------------------------------------------------
+# MODELOS DE RESPUESTA
 
 class ParseResp(BaseModel):
     """

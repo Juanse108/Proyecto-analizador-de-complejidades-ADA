@@ -64,20 +64,13 @@ def create_app() -> FastAPI:
     parser_url = os.getenv("PARSER_URL", "http://localhost:8001")
     analyzer_url = os.getenv("ANALYZER_URL", "http://localhost:8002")
 
-    print(f"""
-╔════════════════════════════════════════════════════════════╗
-║         ORCHESTRATOR SERVICE INITIALIZED                   ║
-╠════════════════════════════════════════════════════════════╣
-║ Service:      Orchestrator                                 ║
-║ Version:      1.0.0                                        ║
-║ Docs:         http://localhost:8000/docs                   ║
-╠════════════════════════════════════════════════════════════╣
-║ Microservicios:                                            ║
-║ LLM_URL:      {llm_url:<43}║
-║ PARSER_URL:   {parser_url:<43}║
-║ ANALYZER_URL: {analyzer_url:<43}║
-╚════════════════════════════════════════════════════════════╝
-    """)
+    # Mostrar configuración de microservicios
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Orchestrator Service iniciado - Puerto: 8000")
+    logger.info(f"LLM Service: {llm_url}")
+    logger.info(f"Parser Service: {parser_url}")
+    logger.info(f"Analyzer Service: {analyzer_url}")
 
     return app
 

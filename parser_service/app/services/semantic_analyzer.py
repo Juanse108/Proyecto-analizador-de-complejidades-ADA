@@ -1,10 +1,6 @@
-"""
-semantic_analyzer.py — Análisis semántico del AST
-=================================================
+"""Análisis semántico del AST.
 
 Responsabilidad: normalización y validación semántica.
-
-Este es el contenido de semantic_pass.py movido a services/
 """
 
 from typing import List, Set, Tuple
@@ -16,35 +12,36 @@ from ..domain.ast_models import (
 )
 
 
-# ---------------------------------------------------------------------------
-# MODELOS
-# ---------------------------------------------------------------------------
-
 class Issue(BaseModel):
-    """Advertencia o error semántico."""
+    """Advertencia o error semántico.
+    
+    Attributes:
+        severity: Nivel de severidad (error, warning)
+        msg: Mensaje descriptivo
+        where: Ubicación opcional del problema
+    """
     severity: str
     msg: str
     where: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# CONSTANTES
-# ---------------------------------------------------------------------------
-
 _REL_OPS: Set[str] = {"==", "!=", "<", "<=", ">", ">="}
 _BOOL_BIN: Set[str] = {"and", "or"}
 
-
-# ---------------------------------------------------------------------------
-# VALIDACIONES
-# ---------------------------------------------------------------------------
 
 class SemanticValidator:
     """Validador semántico con métodos auxiliares."""
 
     @staticmethod
     def looks_boolean(e: Expr) -> bool:
-        """Determina si una expresión parece booleana."""
+        """Determina si una expresión parece booleana.
+        
+        Args:
+            e: Expresión a evaluar
+            
+        Returns:
+            True si la expresión parece ser booleana
+        """
         if isinstance(e, Bool):
             return True
         if isinstance(e, UnOp):
@@ -59,10 +56,6 @@ class SemanticValidator:
                 )
         return False
 
-
-# ---------------------------------------------------------------------------
-# NORMALIZADORES
-# ---------------------------------------------------------------------------
 
 class SemanticNormalizer:
     """Normalizador de estructuras del AST."""
