@@ -1,22 +1,15 @@
-# ============================================================================
-# parser_service/app/__init__.py
-# ============================================================================
-"""
-Parser Service Application
-=========================
+"""Parser Service Application.
 
 Microservicio de análisis sintáctico y semántico de pseudocódigo.
 
 Arquitectura:
-------------
-- api/          : FastAPI endpoints (HTTP layer)
-- domain/       : Modelos del dominio (AST)
-- infrastructure: Dependencias externas (Lark parser, file I/O)
-- services/     : Lógica de negocio y orquestación
-- schemas.py    : Request/Response models (Pydantic)
+    - api/: FastAPI endpoints (HTTP layer)
+    - domain/: Modelos del dominio (AST)
+    - infrastructure/: Dependencias externas (Lark parser, file I/O)
+    - services/: Lógica de negocio y orquestación
+    - schemas.py: Request/Response models (Pydantic)
 
 Usage:
-------
     from app.api import app
     # uvicorn app.api:app --reload
 """

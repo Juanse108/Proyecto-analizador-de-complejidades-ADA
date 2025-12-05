@@ -60,7 +60,6 @@ export class GeminiService {
     };
 
     try {
-      console.log('🔄 Llamando al backend (llm_service)...');
       const response = await firstValueFrom(
         this.http.post<ToGrammarResponse>(
           `${this.backendApiUrl}/to-grammar`,
@@ -68,13 +67,9 @@ export class GeminiService {
         )
       );
 
-      console.log('📨 Respuesta del backend:', response);
-
       if (!response.pseudocode_normalizado) {
         throw new Error('El pseudocódigo generado está vacío');
       }
-
-      console.log('✅ Pseudocódigo generado correctamente');
 
       return {
         pseudocode_normalizado: response.pseudocode_normalizado,
@@ -105,15 +100,12 @@ export class GeminiService {
     };
 
     try {
-      console.log('🔄 Llamando al backend para comparación de análisis...');
       const response = await firstValueFrom(
         this.http.post<ComparisonResponse>(
           `${this.backendApiUrl}/compare-analysis`,
           payload
         )
       );
-
-      console.log('📨 Respuesta de comparación:', response);
 
       return response;
     } catch (error) {

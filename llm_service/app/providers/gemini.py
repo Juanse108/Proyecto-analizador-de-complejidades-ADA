@@ -1,13 +1,13 @@
-# llm_service/app/providers/gemini.py (CORREGIDO CON NORMALIZACIÓN)
-"""
-Proveedor Gemini para normalizar lenguaje natural → pseudocódigo
-compatible con la gramática de `pseudocode.lark`.
+"""Proveedor Gemini para análisis de pseudocódigo.
 
-CORRECCIONES APLICADAS:
-- ✅ Normalización de complejidades antes de enviar al LLM
-- ✅ Comparación normalizada después de recibir respuesta
-- ✅ Recálculo correcto del porcentaje de acuerdo
-- ✅ Prevención de falsos negativos ("1" vs "O(1)")
+Utiliza la API de Google Gemini para:
+- Normalización de pseudocódigo a formato compatible con la gramática
+- Validación y corrección de sintaxis
+- Análisis de complejidad algorítmica
+- Generación de árboles de recursión
+- Comparación de análisis
+
+Incluye normalización de complejidades para evitar falsos negativos.
 """
 
 import json
@@ -29,9 +29,6 @@ from ..schemas import (
 )
 from ..config import settings
 
-# ============================================================================
-# FUNCIONES DE NORMALIZACIÓN LOCAL
-# ============================================================================
 
 def normalize_complexity(s: Optional[str]) -> str:
     """Normaliza strings de complejidad a formato estándar O(...)"""
@@ -66,10 +63,7 @@ def complexities_match(c1: Optional[str], c2: Optional[str]) -> bool:
 
 
 
-# ============================================================================
-# 1. PROMPT DEL SISTEMA (sin cambios)
-# ============================================================================
-
+# PROMPT DEL SISTEMA
 SYSTEM_RULES = r"""
 ⚠️ ⚠️ ⚠️ ADVERTENCIA CRÍTICA SOBRE 'end else' ⚠️ ⚠️ ⚠️
 
@@ -343,9 +337,7 @@ Salida JSON:
 """
 
 
-# ============================================================================
-# 2. SANITIZADORES / POST-PROCESADO (sin cambios)
-# ============================================================================
+# SANITIZADORES Y POST-PROCESADO
 
 def _trim_trailing_orphan_ends(s: str) -> str:
     lines = s.rstrip().splitlines()
@@ -420,9 +412,7 @@ def _dialect_lint(s: str) -> str:
     return t.strip()
 
 
-# ============================================================================
-# 3. UTILIDADES DE EXTRACCIÓN / LIMPIEZA (sin cambios)
-# ============================================================================
+# UTILIDADES DE EXTRACCIÓN Y LIMPIEZA
 
 _JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -444,9 +434,7 @@ def _clean(s: str) -> str:
     return s.replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-# ============================================================================
-# 4. FUNCIONES AUXILIARES PARA GRAPHVIZ
-# ============================================================================
+# FUNCIONES AUXILIARES PARA GRAPHVIZ
 
 def dot_to_svg(dot_string: str) -> str:
     """
@@ -464,7 +452,6 @@ def dot_to_svg(dot_string: str) -> str:
         svg_base64 = base64.b64encode(svg_bytes).decode('utf-8')
         return f"data:image/svg+xml;base64,{svg_base64}"
     except Exception as e:
-        print(f"❌ [dot_to_svg] Error al convertir DOT a SVG: {str(e)}")
         return ""
 
 def build_dot_tree(node: dict, graph: graphviz.Digraph) -> None:
@@ -493,18 +480,12 @@ def build_dot_tree(node: dict, graph: graphviz.Digraph) -> None:
         graph.edge(node_id, child_id)
 
 
-# ============================================================================
-# 4. PROVIDER GEMINI (CON CORRECCIONES)
-# ============================================================================
-
 class GeminiProvider:
     """
-    Proveedor Gemini 2.0 con normalización de complejidades integrada.
+    Proveedor de servicios basados en Google Gemini.
     
-    CORRECCIONES APLICADAS:
-    - ✅ Normaliza complejidades antes de enviar al LLM
-    - ✅ Compara usando complexities_match() después de recibir respuesta
-    - ✅ Recalcula porcentaje de acuerdo correctamente
+    Gestiona la comunicación con la API de Gemini para análisis de pseudocódigo,
+    incluyendo normalización automática de complejidades y validación de sintaxis.
     """
 
     def __init__(self) -> None:
@@ -654,9 +635,7 @@ class GeminiProvider:
         2. Compara usando complexities_match() DESPUÉS de recibir respuesta
         3. Recalcula porcentaje de acuerdo correctamente
         """
-        # 🆕 PASO 1: NORMALIZAR VALORES DEL ANALYZER
-        print("\n🔧 [NORMALIZACIÓN] Normalizando valores del analyzer...")
-        
+        # Normalizar valores del analyzer
         big_o_raw = analyzer_result.get('big_o', 'N/A')
         big_omega_raw = analyzer_result.get('big_omega', 'N/A')
         theta_raw = analyzer_result.get('theta', 'N/A')
@@ -664,10 +643,6 @@ class GeminiProvider:
         big_o_norm = normalize_complexity(big_o_raw)
         big_omega_norm = normalize_complexity(big_omega_raw)
         theta_norm = normalize_complexity(theta_raw)
-        
-        print(f"   Analyzer O(n):  '{big_o_raw}' → '{big_o_norm}'")
-        print(f"   Analyzer Ω(n):  '{big_omega_raw}' → '{big_omega_norm}'")
-        print(f"   Analyzer Θ(n):  '{theta_raw}' → '{theta_norm}'")
         
         # Construir prompt con valores NORMALIZADOS
         comparison_prompt = f"""Eres un experto en análisis de complejidad algorítmica. 
@@ -767,16 +742,6 @@ Responde SOLO con un JSON válido, sin explicaciones adicionales. Estructura exa
                 llm_big_omega = result["llm_analysis"].get("big_omega", "N/A")
                 llm_theta = result["llm_analysis"].get("theta", "N/A")
                 
-                print(f"\n✅ [COMPARACIÓN NORMALIZADA]")
-                print(f"   Big-O:   '{big_o_norm}' vs '{llm_big_o}' → match={complexities_match(big_o_norm, llm_big_o)}")
-                print(f"   Big-Ω:   '{big_omega_norm}' vs '{llm_big_omega}' → match={complexities_match(big_omega_norm, llm_big_omega)}")
-                print(f"   Big-Θ:   '{theta_norm}' vs '{llm_theta}' → match={complexities_match(theta_norm, llm_theta)}")
-                
-                # DEBUG: Mostrar valores crudos
-                print(f"\n🔍 [DEBUG] Valores antes de normalización:")
-                print(f"   Analyzer O: '{big_o_raw}' → Analyzer Ω: '{big_omega_raw}'")
-                print(f"   LLM O: '{llm_big_o}' → LLM Ω: '{llm_big_omega}'")
-                
                 # Actualizar los flags de match usando comparación normalizada
                 result["comparison"]["big_o_match"] = complexities_match(big_o_norm, llm_big_o)
                 result["comparison"]["big_omega_match"] = complexities_match(big_omega_norm, llm_big_omega)
@@ -823,15 +788,8 @@ Responde SOLO con un JSON válido, sin explicaciones adicionales. Estructura exa
         ir_worst: Optional[dict] = None
     ) -> dict:
         """
-        🆕 Genera un árbol de recursión PROFUNDO y REAL analizando el pseudocódigo con LLM.
+        Genera un árbol de recursión profundo y completo analizando el pseudocódigo.
         """
-        print("\n" + "="*80)
-        print("🚀 [analyze_recursion_tree] INICIANDO generación de árbol profundo")
-        print(f"📝 Pseudocódigo ({len(pseudocode)} chars): {pseudocode[:80]}...")
-        print(f"🎯 BigO: {big_o}")
-        print(f"📐 Recurrence: {recurrence_equation}")
-        print("="*80)
-        
         if not pseudocode.strip():
             raise ValueError("El pseudocódigo no puede estar vacío")
 
@@ -844,8 +802,6 @@ Responde SOLO con un JSON válido, sin explicaciones adicionales. Estructura exa
         is_quicksort = 'quick' in pseudocode.lower()
         is_binary_search = 'binarysearch' in pseudocode.lower() or 'binary_search' in pseudocode.lower()
         is_backtracking = 'backtrack' in pseudocode.lower()
-        
-        print(f"🔍 Tipo detectado - Fibonacci: {is_fibonacci}, Factorial: {is_factorial}, MergeSort: {is_mergesort}, QuickSort: {is_quicksort}, BinarySearch: {is_binary_search}, Backtracking: {is_backtracking}")
         
         tree_prompt = f"""🌳 GENERADOR DE ÁRBOLES DE RECURSIÓN - PROFUNDIDAD OBLIGATORIA
 
@@ -1015,21 +971,13 @@ RECUERDA: Tu árbol debe ser VISUALMENTE PROFUNDO cuando se renderice.
 
         for model_name in self.models_chain:
             try:
-                print(f"\n🤖 [analyze_recursion_tree] Intentando con modelo: {model_name}")
                 raw, attempts = self._call_with_retries(model_name, tree_prompt)
-                print(f"✅ [analyze_recursion_tree] Respuesta raw recibida ({len(raw)} chars)")
                 
                 data = _extract_json(raw)
-                print(f"✅ [analyze_recursion_tree] JSON extraído exitosamente")
-                print(f"   - Contiene 'tree': {'tree' in data}")
-                print(f"   - Contiene 'analysis': {'analysis' in data}")
                 
                 if "tree" in data and "analysis" in data:
-                    print(f"✅ [analyze_recursion_tree] Estructura válida - Validando profundidad...")
                     # Validar que el árbol realmente sea profundo
                     if self._validate_tree_depth(data["tree"]["root"]):
-                        print(f"✅ [analyze_recursion_tree] ✓ Árbol profundo válido. Generando SVG...")
-                        
                         # Extraer descripción del árbol generado por el LLM
                         tree_description = data["tree"].get("description", data.get("analysis", ""))
                         
@@ -1049,22 +997,12 @@ RECUERDA: Tu árbol debe ser VISUALMENTE PROFUNDO cuando se renderice.
                             data["tree"]["description"] = tree_description
                         
                         data["svg"] = svg_data
-                        print(f"✅ [analyze_recursion_tree] SVG generado ({len(svg_data)} chars). Devolviendo...")
-                        print("="*80 + "\n")
                         return data
-                    else:
-                        print(f"⚠️ [analyze_recursion_tree] Árbol no tiene suficiente profundidad (min 3). Intentando otro modelo...")
                     
             except Exception as e:
-                print(f"❌ [analyze_recursion_tree] Error con {model_name}: {type(e).__name__}: {str(e)}")
                 issues.append(f"[{model_name}] {type(e).__name__}: {str(e)}")
 
         # Fallback con árbol genérico si falla el LLM
-        print(f"\n⚠️ [analyze_recursion_tree] Todos los modelos fallaron. Usando fallback genérico")
-        print(f"   Errores: {issues[:1]}")
-        print("="*80 + "\n")
-        
-        # Generar árbol de fallback mejorado según el tipo de algoritmo
         fallback_response = self._generate_fallback_tree(
             pseudocode, big_o, is_fibonacci, is_factorial, is_mergesort, is_quicksort, is_binary_search
         )
@@ -1077,9 +1015,7 @@ RECUERDA: Tu árbol debe ser VISUALMENTE PROFUNDO cuando se renderice.
             build_dot_tree(fallback_response["tree"]["root"], graph)
             svg_data = graph.pipe(format='svg').decode('utf-8')
             fallback_response["svg"] = svg_data
-            print(f"✅ [analyze_recursion_tree] SVG fallback generado ({len(svg_data)} bytes)")
         except Exception as svg_error:
-            print(f"⚠️ [analyze_recursion_tree] Error generando SVG fallback: {svg_error}")
             fallback_response["svg"] = None
         
         return fallback_response

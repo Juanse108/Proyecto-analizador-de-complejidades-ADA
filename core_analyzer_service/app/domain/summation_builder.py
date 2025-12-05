@@ -1,28 +1,26 @@
-# core_analyzer_service/app/domain/summation_builder.py (CORREGIDO FINAL)
-"""
-summation_builder.py - Construcción de representaciones de sumatorias
-=====================================================================
+"""Construcción de representaciones de sumatorias.
 
-CORRECCIÓN: Genera fórmulas matemáticas correctas según el grado del polinomio
-detectado, resolviendo los errores de O(1) para O(n) y O(n^3).
-
-UBICACIÓN: core_analyzer_service/app/domain/summation_builder.py
+Genera fórmulas matemáticas correctas según el grado del polinomio detectado,
+proporcionando análisis completo de sumatorias para algoritmos.
 """
 
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import re
 
-# ====================================================================
-# DATACLASSES Y UTILS (No modificadas, se mantienen por contexto)
-# ====================================================================
-
 @dataclass
 class Summation:
-    """
-    Representa una sumatoria matemática.
+    """Representa una sumatoria matemática.
     
-    Ejemplo: Σ_{i=1}^{n-1} (n - i)
+    Attributes:
+        index_var: Variable de índice
+        lower_bound: Límite inferior
+        upper_bound: Límite superior
+        body: Cuerpo de la sumatoria
+        nested: Sumatoria anidada opcional
+    
+    Ejemplo:
+        Σ_{i=1}^{n-1} (n - i)
     """
     index_var: str
     lower_bound: str
@@ -31,7 +29,11 @@ class Summation:
     nested: Optional['Summation'] = None
     
     def to_latex(self) -> str:
-        """Convierte a notación LaTeX."""
+        """Convierte la sumatoria a notación LaTeX.
+        
+        Returns:
+            String con la representación LaTeX
+        """
         result = f"\\sum_{{{self.index_var}={self.lower_bound}}}^{{{self.upper_bound}}} "
         if self.nested:
             result += self.nested.to_latex()
@@ -40,7 +42,11 @@ class Summation:
         return result
     
     def to_text(self) -> str:
-        """Convierte a texto plano legible."""
+        """Convierte la sumatoria a texto plano legible.
+        
+        Returns:
+            String con la representación en texto plano
+        """
         result = f"Σ_{{{self.index_var}={self.lower_bound}}}^{{{self.upper_bound}}} "
         if self.nested:
             result += self.nested.to_text()
@@ -51,7 +57,11 @@ class Summation:
 
 @dataclass
 class SummationAnalysis:
-    """Análisis completo de sumatorias para un algoritmo."""
+    """Análisis completo de sumatorias para un algoritmo.
+    
+    Incluye representaciones de sumatorias, simplificaciones y polinomios
+    para casos peor, mejor y promedio, en formatos texto y LaTeX.
+    """
     worst_summation: str
     best_summation: str
     avg_summation: Optional[str]
@@ -79,7 +89,15 @@ class SummationAnalysis:
 
 
 def _expr_to_string(expr: Any, context: Dict[str, str]) -> str:
-    """Convierte una expresión del AST a string matemático."""
+    """Convierte una expresión del AST a string matemático.
+    
+    Args:
+        expr: Expresión del AST a convertir
+        context: Contexto con variables
+        
+    Returns:
+        Representación en string de la expresión
+    """
     if not isinstance(expr, dict):
         return str(expr)
     
@@ -108,7 +126,15 @@ def _expr_to_string(expr: Any, context: Dict[str, str]) -> str:
     return "n"
 
 def _count_loop_depth(stmts: List[dict], depth: int = 0) -> int:
-    """Cuenta la profundidad máxima de bucles anidados."""
+    """Cuenta la profundidad máxima de bucles anidados.
+    
+    Args:
+        stmts: Lista de sentencias a analizar
+        depth: Profundidad actual (por defecto: 0)
+        
+    Returns:
+        Profundidad máxima encontrada
+    """
     max_depth = depth
     
     for stmt in stmts:
@@ -135,7 +161,14 @@ def _count_loop_depth(stmts: List[dict], depth: int = 0) -> int:
 
 
 def _find_outer_loop(stmts: List[dict]) -> Optional[dict]:
-    """Encuentra el primer bucle del programa."""
+    """Encuentra el primer bucle del programa.
+    
+    Args:
+        stmts: Lista de sentencias a buscar
+        
+    Returns:
+        Primer bucle encontrado o None
+    """
     for stmt in stmts:
         if isinstance(stmt, dict) and stmt.get("kind") in ("for", "while", "repeat"):
             return stmt
@@ -143,7 +176,14 @@ def _find_outer_loop(stmts: List[dict]) -> Optional[dict]:
 
 
 def _find_inner_loop(outer_loop: dict) -> Optional[dict]:
-    """Encuentra el bucle anidado dentro de otro bucle."""
+    """Encuentra el bucle anidado dentro de otro bucle.
+    
+    Args:
+        outer_loop: Bucle externo donde buscar
+        
+    Returns:
+        Bucle interno encontrado o None
+    """
     body = outer_loop.get("body", [])
     return _find_outer_loop(body)
 
@@ -167,9 +207,6 @@ def _expr_uses_var(expr: dict, varname: str) -> bool:
     
     return False
 
-# ====================================================================
-# CORE BUILDERS (Funciones corregidas)
-# ====================================================================
 
 def _create_constant_analysis() -> SummationAnalysis:
     """Genera análisis para O(1)."""
@@ -363,18 +400,21 @@ def _create_polynomial_analysis(depth: int) -> SummationAnalysis:
         avg_polynomial_latex=polynomial_latex,
     )
 
-# ====================================================================
-# ANALISIS Y FORMATO FINAL (Función corregida)
-# ====================================================================
 
 def _detect_binary_search_pattern(stmts: List[dict]) -> bool:
-    """
-    Detecta si el código contiene un patrón de búsqueda binaria.
-    Características:
+    """Detecta si el código contiene un patrón de búsqueda binaria.
+    
+    Características buscadas:
     - Un while loop
     - Variables left/right o low/high
     - División por 2 del mid point
     - Asignaciones left = mid+1 o right = mid-1
+    
+    Args:
+        stmts: Lista de sentencias a analizar
+        
+    Returns:
+        True si se detecta el patrón
     """
     def _check_binary_search_recursive(statements: List[dict]) -> bool:
         for stmt in statements:
@@ -659,9 +699,3 @@ def generate_summations_from_expressions(worst_expr: str, best_expr: str, avg_ex
         result["avg"] = create_case_summation(avg_expr, "avg")
     
     return result
-
-
-
-# ====================================================================
-# FIN DEL ARCHIVO
-# ====================================================================

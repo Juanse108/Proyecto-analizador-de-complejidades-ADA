@@ -1,13 +1,11 @@
-"""
-main.py — Entry point del microservicio
-=======================================
+"""Punto de entrada del microservicio.
 
 Punto de entrada simplificado que importa la app de api/routes.py
+
+Usage:
+    uvicorn app.main:app --reload
 """
 
 from .api.routes import app
-
-# Re-exportar para que Uvicorn pueda encontrarlo:
-# uvicorn app.main:app --reload
 
 __all__ = ["app"]

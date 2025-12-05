@@ -1,8 +1,8 @@
 """
-recurrence.py - Modelos de recurrencia mejorados
-================================================
+Recurrence relation models.
 
-CAMBIO PRINCIPAL: Añadimos campo 'equation_text' para la ecuación completa.
+Defines data structures for representing and analyzing recurrence relations
+in recursive algorithms.
 """
 
 from typing import Optional
@@ -14,21 +14,21 @@ from .expr import Expr
 @dataclass
 class RecurrenceRelation:
     """
-    Representa una relación de recurrencia.
+    Represents a recurrence relation.
     
-    Formas soportadas:
+    Supported forms:
     1. Divide & Conquer: T(n) = a·T(n/b) + f(n)
-    2. Lineal simple: T(n) = c·T(n-1) + f(n)
-    3. Lineal doble: T(n) = c·T(n-1) + d·T(n-2) + f(n)
+    2. Simple linear: T(n) = c·T(n-1) + f(n)
+    3. Double linear: T(n) = c·T(n-1) + d·T(n-2) + f(n)
     
-    Atributos:
-        a: Número de subproblemas (en divide & conquer)
-        b: Factor de división del tamaño (n/b)
-        c: Coeficiente de T(n-1) (en recursión lineal)
-        d: Coeficiente de T(n-2) (en recursión lineal de orden 2)
-        f_expr: Trabajo no recursivo (expresión simbólica)
-        base_case: Caso base T(1) o T(0)
-        equation_text: 🆕 ECUACIÓN COMPLETA como string legible
+    Attributes:
+        a: Number of subproblems (in divide & conquer)
+        b: Division factor (n/b)
+        c: Coefficient of T(n-1) (in linear recursion)
+        d: Coefficient of T(n-2) (in order-2 linear recursion)
+        f_expr: Non-recursive work (symbolic expression)
+        base_case: Base case T(1) or T(0)
+        equation_text: Full equation as readable string
     """
     a: int
     b: int
@@ -36,15 +36,15 @@ class RecurrenceRelation:
     d: int = 0
     f_expr: Expr = None
     base_case: Expr = None
-    equation_text: str = ""  # 🆕 NUEVO CAMPO
+    equation_text: str = ""
 
 
 @dataclass
 class RecursiveAnalysisResult:
     """
-    Resultado completo del análisis recursivo.
+    Complete result of recursive analysis.
     
-    🆕 NUEVO: Incluye la ecuación de recurrencia formateada.
+    Includes the formatted recurrence equation for display.
     """
     recurrence: RecurrenceRelation
     big_o: Expr
@@ -53,4 +53,4 @@ class RecursiveAnalysisResult:
     method_used: str
     master_theorem_case: Optional[int]
     explanation: str
-    recurrence_equation: str = ""  # 🆕 NUEVO: ecuación lista para mostrar
+    recurrence_equation: str = ""

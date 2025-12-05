@@ -1,29 +1,19 @@
-"""
-ast_models.py — Definición del Árbol de Sintaxis Abstracta (AST)
-================================================================
+"""Modelos del Árbol de Sintaxis Abstracta (AST).
 
-Este módulo define las **clases de datos** que representan la estructura
-intermedia (AST) del pseudocódigo una vez parseado.
-Cada nodo es un modelo Pydantic para facilitar la validación y la
-serialización a JSON (útil en microservicios o APIs).
+Define las clases Pydantic que representan la estructura del AST:
+- SrcLoc: ubicación en código fuente
+- Expresiones: Num, Bool, Var, UnOp, BinOp, FuncCall, Range, etc.
+- Sentencias: Assign, For, While, If, Repeat, Call, Block
+- Procedimientos: Proc, Program
 
-Estructura general:
--------------------
-1. Ubicación de tokens (SrcLoc)
-2. Expresiones (Num, Bool, Var, UnOp, BinOp, FuncCall, etc.)
-3. Sentencias (Assign, For, While, If, Repeat, Call, Block)
-4. Procedimientos y programa raíz (Proc, Program)
-
-
+Permite validación y serialización JSON automática.
 """
 
 from typing import List, Optional, Union, Literal
 from pydantic import BaseModel, Field as PydField
 
 
-# ---------------------------------------------------------------------------
-# 1️. UBICACIÓN EN EL CÓDIGO FUENTE
-# ---------------------------------------------------------------------------
+# UBICACIÓN EN CÓDIGO FUENTE
 
 class SrcLoc(BaseModel):
     """
@@ -134,9 +124,7 @@ class FuncCall(BaseModel):
 Expr = Union[Num, Bool, NullLit, LValue, UnOp, BinOp, FuncCall, Range]
 
 
-# ---------------------------------------------------------------------------
-# 3. SENTENCIAS (con ubicación opcional)
-# ---------------------------------------------------------------------------
+# SENTENCIAS
 
 class Assign(NodeWithLoc):
     """Sentencia de asignación: <variable> <- <expresión>."""
@@ -191,9 +179,7 @@ class Repeat(NodeWithLoc):
     until: Expr
 
 
-# ---------------------------------------------------------------------------
-# 4️. PROCEDIMIENTOS Y PROGRAMA
-# ---------------------------------------------------------------------------
+# PROCEDIMIENTOS Y PROGRAMA
 
 class Proc(BaseModel):
     """
@@ -225,9 +211,7 @@ class Program(BaseModel):
     body: List[Union[Stmt, Proc]] = PydField(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
-# 5️. RECONSTRUCCIÓN DE REFERENCIAS CIRCULARES
-# ---------------------------------------------------------------------------
+# RECONSTRUCCIÓN DE REFERENCIAS CIRCULARES
 
 # Pydantic requiere este paso para resolver forward refs
 for _M in (

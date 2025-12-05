@@ -1,6 +1,4 @@
-# core_analyzer_service/app/iterative/execution_trace.py
-"""
-Módulo para generar tablas de seguimiento de ejecución de algoritmos iterativos.
+"""Generación de tablas de seguimiento de ejecución de algoritmos iterativos.
 
 Este módulo simula la ejecución del pseudocódigo paso a paso, registrando:
 - Estado de variables en cada iteración
@@ -17,8 +15,7 @@ from dataclasses import dataclass
 
 @dataclass
 class TraceStep:
-    """
-    Representa un paso en la traza de ejecución.
+    """Representa un paso en la traza de ejecución.
     
     Atributos:
         step: Número de paso (0, 1, 2, ...)
@@ -46,8 +43,7 @@ class TraceStep:
 
 @dataclass
 class ExecutionTrace:
-    """
-    Resultado completo de la traza de ejecución.
+    """Resultado completo de la traza de ejecución.
     
     Atributos:
         steps: Lista de pasos de la ejecución
@@ -55,6 +51,7 @@ class ExecutionTrace:
         max_depth: Profundidad máxima de anidamiento alcanzada
         variables_tracked: Variables rastreadas durante la ejecución
         complexity_formula: Fórmula de complejidad derivada de la traza
+        description: Descripción textual de la traza
     """
     steps: List[TraceStep]
     total_iterations: int
@@ -68,27 +65,23 @@ def generate_trace_for_simple_loop(
     ast: dict,
     param_name: str = "n"
 ) -> ExecutionTrace:
-    """
-    Genera una traza de ejecución para un bucle simple for i = 1 to n o while.
+    """Genera una traza de ejecución para un bucle simple.
     
-    Ejemplo de salida:
-        Step | Condition | Variables      | Operation    | Cost | Cumulative
-        -----|-----------|----------------|--------------|------|------------
-        0    | -         | n=5            | init         | 1    | 1
-        1    | i<=5      | i=1, n=5       | i++, body    | 1    | 2
-        2    | i<=5      | i=2, n=5       | i++, body    | 1    | 3
-        ...
+    Maneja bucles for (for i = 1 to n) y while.
+    
+    Args:
+        ast: Árbol de sintaxis abstracta del programa
+        param_name: Nombre del parámetro que representa el tamaño
+        
+    Returns:
+        ExecutionTrace con los pasos de ejecución simulados
     """
     # Buscar el primer bucle (for o while) en el AST
     loop_stmt, loop_kind = _find_first_loop(ast)
     
     if not loop_stmt or not loop_kind:
-        print(f"   DEBUG: No se encontró bucle for/while, usando fallback")
         return _generate_trace_fallback(ast, param_name)
     
-    print(f"   DEBUG: Encontrado bucle {loop_kind.upper()}")
-    
-    # Si es while, usar la función específica
     if loop_kind == "while":
         return _generate_trace_for_while_loop(ast, param_name)
     
@@ -331,10 +324,6 @@ def generate_execution_trace(
     else:
         return _generate_trace_fallback(ast, param_name)
 
-
-# ============================================================================
-# Funciones auxiliares
-# ============================================================================
 
 def _extract_loop_var(for_stmt: dict) -> str:
     """Extrae el nombre de la variable del bucle for."""

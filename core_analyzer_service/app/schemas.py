@@ -1,6 +1,4 @@
-"""
-schemas.py - Modelos de datos para el microservicio de análisis de complejidad
-==============================================================================
+"""Modelos de datos para el microservicio de análisis de complejidad.
 
 Define los esquemas de entrada/salida para los endpoints del analizador,
 incluyendo análisis línea por línea y soporte para iterativo/recursivo.
@@ -9,10 +7,6 @@ incluyendo análisis línea por línea y soporte para iterativo/recursivo.
 from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field
 
-
-# ---------------------------------------------------------------------------
-# 1. REQUEST MODELS
-# ---------------------------------------------------------------------------
 
 class AnalyzeAstReq(BaseModel):
     """
@@ -29,10 +23,6 @@ class AnalyzeAstReq(BaseModel):
     detail: Literal["program", "line-by-line"] = "program"
     cost_model: Optional[Dict[str, Any]] = None
 
-
-# ---------------------------------------------------------------------------
-# 2. INTERMEDIATE MODELS (metadatos del AST)
-# ---------------------------------------------------------------------------
 
 class FunctionMetadata(BaseModel):
     """
@@ -60,10 +50,6 @@ class ProgramMetadata(BaseModel):
     functions: Dict[str, FunctionMetadata] = Field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# 3. LINE-BY-LINE COST MODELS
-# ---------------------------------------------------------------------------
-
 class LineCost(BaseModel):
     """
     Representa el costo de una línea individual de código.
@@ -85,10 +71,6 @@ class LineCost(BaseModel):
     cost_best: str
     cost_avg: Optional[str] = None
 
-
-# ---------------------------------------------------------------------------
-# 3b. EXECUTION TRACE MODELS (Seguimiento Iterativo)
-# ---------------------------------------------------------------------------
 
 class TraceStep(BaseModel):
     """
@@ -115,10 +97,9 @@ class TraceStep(BaseModel):
 
 
 class ExecutionTrace(BaseModel):
-    """
-    Traza completa de ejecución de un algoritmo iterativo.
+    """Traza completa de ejecución de un algoritmo iterativo.
     
-    Esta es la versión para el seguimiento del pseudocódigo iterativo,
+    Proporciona seguimiento del pseudocódigo iterativo,
     equivalente al árbol de recursión para algoritmos recursivos.
     
     Atributos:
@@ -136,10 +117,6 @@ class ExecutionTrace(BaseModel):
     complexity_formula: str
     description: str = ""
 
-
-# ---------------------------------------------------------------------------
-# 4. STRONG BOUNDS (COTAS FUERTES)
-# ---------------------------------------------------------------------------
 
 class StrongBounds(BaseModel):
     """
@@ -176,18 +153,11 @@ class StrongBounds(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------------
-# 5. RESPONSE MODELS
-# ---------------------------------------------------------------------------
-
-# ... (código anterior sin cambios hasta analyzeAstResp) ...
-
 class analyzeAstResp(BaseModel):
-    """
-    Respuesta del análisis de complejidad.
+    """Respuesta del análisis de complejidad.
     
-    🆕 NUEVO: Campo recurrence_equation para mostrar en UI.
-    🆕 NUEVO: Campo execution_trace para seguimiento iterativo.
+    Incluye cotas asintóticas, ecuación de recurrencia (si es recursivo),
+    traza de ejecución (si es iterativo), y análisis detallado.
     """
     algorithm_kind: str
     big_o: str
@@ -216,26 +186,20 @@ class analyzeAstResp(BaseModel):
         description="Sumatorias y derivación por caso: worst/best/avg. Cada caso contiene {latex, text}."
     )
 
-    # 🆕 NUEVO CAMPO (recursivo)
     recurrence_equation: Optional[str] = Field(
         default=None,
-        description="Ecuación de recurrencia COMPLETA (solo para algoritmos recursivos).\nEjemplo: 'T(n) = 2·T(n/2) + c·n,  n > 1\\nT(1) = d'"
+        description="Ecuación de recurrencia completa (solo para algoritmos recursivos). Ejemplo: 'T(n) = 2·T(n/2) + c·n,  n > 1\\nT(1) = d'"
     )
     
-    # 🆕 NUEVO CAMPO (iterativo)
     execution_trace: Optional[ExecutionTrace] = Field(
         default=None,
-        description="Traza de ejecución paso a paso (solo para algoritmos iterativos).\nMuestra el seguimiento del pseudocódigo con estados de variables."
+        description="Traza de ejecución paso a paso (solo para algoritmos iterativos). Muestra el seguimiento del pseudocódigo con estados de variables."
     )
 
 
 # Alias opcional para compatibilidad con código que use el nombre antiguo
 AnalyzeAstResp = analyzeAstResp
 
-
-# ---------------------------------------------------------------------------
-# 6. ERROR MODELS
-# ---------------------------------------------------------------------------
 
 class AnalysisError(BaseModel):
     """

@@ -1,6 +1,4 @@
-"""
-grammar_loader.py — Gestión de carga de gramática Lark
-======================================================
+"""Gestión de carga de gramática Lark.
 
 Responsabilidad única: cargar y cachear la gramática desde el archivo.
 """
@@ -17,12 +15,11 @@ class GrammarLoader:
     @classmethod
     @lru_cache(maxsize=1)
     def load(cls) -> str:
-        """
-        Carga la gramática desde el archivo .lark
-
+        """Carga la gramática desde el archivo .lark.
+        
         Returns:
-            str: Contenido de la gramática
-
+            Contenido de la gramática
+        
         Raises:
             FileNotFoundError: Si no se encuentra el archivo
         """
@@ -36,5 +33,9 @@ class GrammarLoader:
 
     @classmethod
     def get_path(cls) -> Path:
-        """Retorna la ruta del archivo de gramática."""
+        """Retorna la ruta del archivo de gramática.
+        
+        Returns:
+            Path al archivo pseudocode.lark
+        """
         return cls._grammar_path

@@ -1,17 +1,13 @@
-# core_analyzer_service/app/domain/complexity_normalizer.py
 """
-complexity_normalizer.py - Normalización de strings de complejidad
-==================================================================
+Complexity normalization utilities.
 
-Resuelve el problema de comparación entre diferentes formatos:
+Resolves comparison issues between different complexity formats:
 - "1" vs "O(1)"
 - "n" vs "O(n)"
 - "n^2" vs "O(n²)"
 - "log n" vs "O(log n)"
 
-Esto previene falsos negativos en la comparación Analyzer vs LLM.
-
-UBICACIÓN: core_analyzer_service/app/domain/complexity_normalizer.py
+This prevents false negatives when comparing analyzer results with LLM outputs.
 """
 
 import re
@@ -49,17 +45,13 @@ def normalize_complexity(complexity_str: Optional[str]) -> str:
     if not complexity_str:
         return "O(?)"
     
-    # Limpiar espacios extra
     s = complexity_str.strip()
     
-    # Si ya está en formato O(...), dejarlo como está
     if s.startswith("O(") or s.startswith("Ω(") or s.startswith("Θ("):
         return s
     
-    # Convertir a minúsculas para comparación (pero preservar en resultado)
     s_lower = s.lower()
     
-    # === CONSTANTE ===
     if s_lower in ("1", "c", "constant", "constante", "o(1)"):
         return "O(1)"
     
@@ -212,47 +204,3 @@ def extract_degree(complexity_str: Optional[str]) -> tuple[int, int]:
         return (999, 0)
     
     return (0, 0)
-
-
-# === TESTS UNITARIOS (ejecutar con pytest) ===
-
-def test_normalize_complexity():
-    """Tests de normalización básica."""
-    assert normalize_complexity("1") == "O(1)"
-    assert normalize_complexity("n") == "O(n)"
-    assert normalize_complexity("n²") == "O(n²)"
-    assert normalize_complexity("n^2") == "O(n²)"
-    assert normalize_complexity("log n") == "O(log n)"
-    assert normalize_complexity("n log n") == "O(n log n)"
-    assert normalize_complexity("O(n)") == "O(n)"  # Ya normalizado
-    print("✅ test_normalize_complexity passed")
-
-
-def test_complexities_match():
-    """Tests de comparación."""
-    assert complexities_match("1", "O(1)") == True
-    assert complexities_match("n", "O(n)") == True
-    assert complexities_match("n²", "O(n^2)") == True
-    assert complexities_match("log n", "O(log n)") == True
-    assert complexities_match("n", "O(n²)") == False
-    assert complexities_match("1", "O(n)") == False
-    print("✅ test_complexities_match passed")
-
-
-def test_extract_degree():
-    """Tests de extracción de grado."""
-    assert extract_degree("O(1)") == (0, 0)
-    assert extract_degree("O(n)") == (1, 0)
-    assert extract_degree("O(n²)") == (2, 0)
-    assert extract_degree("O(n^3)") == (3, 0)
-    assert extract_degree("O(log n)") == (0, 1)
-    assert extract_degree("O(n log n)") == (1, 1)
-    print("✅ test_extract_degree passed")
-
-
-if __name__ == "__main__":
-    # Ejecutar tests
-    test_normalize_complexity()
-    test_complexities_match()
-    test_extract_degree()
-    print("\n🎉 Todos los tests pasaron correctamente")

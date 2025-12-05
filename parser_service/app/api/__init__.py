@@ -1,15 +1,5 @@
-# ============================================================================
-# parser_service/app/api/__init__.py
-# ============================================================================
-"""
-API layer - FastAPI endpoints
-"""
+"""API layer - FastAPI endpoints."""
 
 from .routes import app
 
 __all__ = ["app"]
-
-
-
-
-
