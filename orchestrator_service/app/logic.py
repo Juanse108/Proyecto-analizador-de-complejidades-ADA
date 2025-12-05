@@ -187,7 +187,8 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         method_used=analysis_result.method_used,
         strong_bounds=analysis_result.strong_bounds,
         summations=analysis_result.summations,
-        recurrence_equation=analysis_result.recurrence_equation,  # 🆕 NUEVO
+        recurrence_equation=analysis_result.recurrence_equation,
+        execution_trace=analysis_result.execution_trace,  # 🆕 NUEVO - FORWARDING
     )
 
 # ---------------------------------------------------------------------------

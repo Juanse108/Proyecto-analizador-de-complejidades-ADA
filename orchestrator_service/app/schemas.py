@@ -95,15 +95,19 @@ class AnalyzerResult(BaseModel):
         None,
         description="Fórmula explícita con cotas ajustadas"
     )
-    summations: Optional[Dict[str, str]] = Field(
+    summations: Optional[Dict[str, Dict[str, str]]] = Field(
         None,
-        description="Sumatorias explícitas por caso (worst, best, avg)"
+        description="Sumatorias explícitas por caso (worst, best, avg). Cada caso contiene {latex, text}."
     )
     
-    # 🆕 CAMPO FALTANTE - AÑADIR AQUÍ
     recurrence_equation: Optional[str] = Field(
         None,
         description="Ecuación de recurrencia completa (solo algoritmos recursivos)"
+    )
+    
+    execution_trace: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Diagrama de seguimiento de ejecución paso a paso (solo algoritmos iterativos)"
     )
 
     @field_validator('notes', mode='before')
@@ -159,10 +163,14 @@ class OrchestratorResponse(BaseModel):
     lines: Optional[List[Dict[str, Any]]] = None
     method_used: Optional[str] = None
     strong_bounds: Optional[Dict[str, Any]] = None
-    summations: Optional[Dict[str, str]] = None
+    summations: Optional[Dict[str, Dict[str, str]]] = None
     
-    # 🆕 NUEVO CAMPO
     recurrence_equation: Optional[str] = Field(
         None,
         description="Ecuación de recurrencia completa (solo algoritmos recursivos)"
+    )
+    
+    execution_trace: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Diagrama de seguimiento de ejecución paso a paso (solo algoritmos iterativos)"
     )

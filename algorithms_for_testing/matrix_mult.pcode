@@ -1,0 +1,13 @@
+begin
+  for i <- 1 to n do
+  begin
+    for j <- 1 to n do
+    begin
+      C[i][j] <- 0
+      for k <- 1 to n do
+      begin
+        C[i][j] <- C[i][j] + A[i][k] * B[k][j]
+      end
+    end
+  end
+end

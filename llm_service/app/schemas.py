@@ -19,7 +19,7 @@ Agrupa los modelos de entrada/salida de los distintos endpoints:
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -287,3 +287,81 @@ class CompareAnalysisResponse(BaseModel):
     comparison: ComparisonDetails
     summary: str
     line_analysis: Optional[List[LineCostDetail]] = None
+
+
+# ---------------------------------------------------------------------------
+# analyze-recursion-tree (🆕 NUEVO)
+# ---------------------------------------------------------------------------
+
+class RecursionNodeSchema(BaseModel):
+    """
+    Nodo de un árbol de recursión.
+    
+    Atributos:
+        level: Nivel en el árbol (profundidad)
+        cost: Costo en este nodo (ej: "n", "n/2", "1")
+        width: Ancho relativo para visualización
+        children: Lista de nodos hijos
+    """
+    level: int
+    cost: str
+    width: int
+    children: List['RecursionNodeSchema'] = []
+
+    @field_validator('width', mode='before')
+    @classmethod
+    def convert_width_to_int(cls, v):
+        """Convierte width a entero, redondeando si es float"""
+        if isinstance(v, (int, float)):
+            return int(round(v))
+        return v
+
+
+class RecursionTreeSchema(BaseModel):
+    """
+    Estructura del árbol de recursión completo.
+    
+    Atributos:
+        root: Nodo raíz del árbol
+        height: Altura del árbol
+        totalCost: Costo total acumulado
+        description: Descripción textual del análisis
+    """
+    root: RecursionNodeSchema
+    height: int | str
+    totalCost: str
+    description: str
+
+
+class AnalyzeRecursionTreeRequest(BaseModel):
+    """
+    Petición para analizar un árbol de recursión usando LLM.
+    
+    Atributos:
+        pseudocode: Código pseudocódigo del algoritmo recursivo
+        big_o: Complejidad en notación Big-O (ej: "O(n log n)")
+        recurrence_equation: Ecuación de recurrencia del algoritmo
+        ir_worst: Representación IR del peor caso (JSON)
+    """
+    pseudocode: str
+    big_o: str
+    recurrence_equation: Optional[str] = None
+    ir_worst: Optional[dict] = None
+
+
+class AnalyzeRecursionTreeResponse(BaseModel):
+    """
+    Respuesta con el árbol de recursión generado por LLM.
+    
+    Atributos:
+        tree: Estructura del árbol de recursión
+        analysis: Análisis textual del árbol
+        svg: SVG del árbol renderizado (opcional)
+    """
+    tree: RecursionTreeSchema
+    analysis: str
+    svg: Optional[str] = None
+
+
+# Actualizar referencias forward en RecursionNodeSchema
+RecursionNodeSchema.model_rebuild()

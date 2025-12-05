@@ -1,4 +1,4 @@
-.container {
+﻿.container {
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
@@ -313,4 +313,10 @@
   .pseudocode-output {
     font-size: 0.9em;
   }
+}
+
+/* Estilos para el componente de textarea con líneas */
+app-textarea-with-lines {
+  display: block;
+  width: 100%;
 }

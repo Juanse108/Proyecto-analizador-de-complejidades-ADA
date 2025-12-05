@@ -6,6 +6,7 @@ from ..schemas import (
     ClassifyRequest, ClassifyResponse,
     CompareRequest, CompareResponse,
     CompareAnalysisRequest, CompareAnalysisResponse,
+    AnalyzeRecursionTreeRequest, AnalyzeRecursionTreeResponse,
 )
 from ..providers.gemini import GeminiProvider
 
@@ -68,6 +69,42 @@ async def compare_analysis(payload: CompareAnalysisRequest):
         )
         return CompareAnalysisResponse(**result)
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analyze-recursion-tree", response_model=AnalyzeRecursionTreeResponse)
+async def analyze_recursion_tree(payload: AnalyzeRecursionTreeRequest):
+    """🆕 Analiza un árbol de recursión usando LLM.
+    
+    Recibe pseudocódigo, complejidad y ecuación de recurrencia,
+    y devuelve un árbol de recursión visualizable.
+    """
+    try:
+        print("\n" + "="*80)
+        print("📨 [ENDPOINT analyze-recursion-tree] Solicitud recibida")
+        print(f"📝 Pseudocódigo: {payload.pseudocode[:100]}...")
+        print(f"🎯 BigO: {payload.big_o}")
+        print(f"📐 Recurrence: {payload.recurrence_equation}")
+        print("="*80)
+        
+        result = await provider().analyze_recursion_tree(
+            payload.pseudocode,
+            payload.big_o,
+            payload.recurrence_equation,
+            payload.ir_worst
+        )
+        
+        print("\n" + "="*80)
+        print("✅ [ENDPOINT analyze-recursion-tree] Respuesta generada exitosamente")
+        print(f"📊 Height: {result.get('tree', {}).get('height')}")
+        print(f"💰 Total Cost: {result.get('tree', {}).get('totalCost')}")
+        print("="*80 + "\n")
+        
+        return AnalyzeRecursionTreeResponse(**result)
+    except Exception as e:
+        print("\n" + "="*80)
+        print(f"❌ [ENDPOINT analyze-recursion-tree] ERROR: {str(e)}")
+        print("="*80 + "\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 

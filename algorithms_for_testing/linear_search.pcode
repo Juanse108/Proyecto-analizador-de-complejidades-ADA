@@ -1,0 +1,8 @@
+found <- false
+i <- 1
+while (i <= n) do
+  if (arr[i] == x) then
+    found <- true
+  end-if
+  i <- i + 1
+end-while

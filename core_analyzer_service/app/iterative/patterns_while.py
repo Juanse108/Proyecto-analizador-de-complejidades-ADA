@@ -101,7 +101,47 @@ def cond_var_lt_const(cond: dict, varname: str) -> bool:
 
 
 def is_found_flag_while(cond: dict, body: List[dict]) -> bool:
-    return expr_uses_var(cond, "found") and stmt_list_has_assign_to_var(body, "found")
+    """Detecta si el while tiene un flag de búsqueda.
+    
+    Casos:
+    1. Condición usa "found": while (found) ...
+    2. Body asigna "found = true": búsqueda con early exit
+    """
+    # Caso 1: Condición usa found directamente
+    if expr_uses_var(cond, "found") and stmt_list_has_assign_to_var(body, "found"):
+        return True
+    
+    # Caso 2: Búsqueda con early exit (encontrar e inmediatamente asignar found/break)
+    # Buscar si el body contiene asignación a variables de bandera
+    def has_early_exit_assignment(stmts: List[dict]) -> bool:
+        """Busca 'found = true' o similar dentro de if statements"""
+        for st in stmts:
+            if st.get("kind") == "assign":
+                tgt = st.get("target", {})
+                expr = st.get("expr", {})
+                tgt_name = tgt.get("name", "").lower() if isinstance(tgt, dict) else ""
+                
+                # Buscar asignaciones como: found <- true, found <- 1, etc.
+                if tgt_name in ["found", "encontrado", "existe"]:
+                    return True
+            
+            elif st.get("kind") == "if":
+                if has_early_exit_assignment(st.get("then_body", [])):
+                    return True
+                if has_early_exit_assignment(st.get("else_body", [])):
+                    return True
+            
+            elif st.get("kind") == "block":
+                if has_early_exit_assignment(st.get("stmts", [])):
+                    return True
+        
+        return False
+    
+    # Si hay asignación a "found" en el body, es una búsqueda con early exit
+    if has_early_exit_assignment(body):
+        return True
+    
+    return False
 
 
 def find_linear_index_var(body: List[dict]) -> Optional[str]:

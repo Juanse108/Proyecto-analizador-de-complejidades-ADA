@@ -39,9 +39,12 @@
 
       <div class="input-wrapper">
         <!-- Área de Pseudocódigo Generado -->
-        <textarea class="pseudocode-output" [value]="generatedPseudocode" rows="8" readonly
+        <app-textarea-with-lines 
+          [value]="generatedPseudocode" 
+          [rows]="15" 
+          [disabled]="true"
           placeholder="El pseudocódigo aparecerá aquí...">
-        </textarea>
+        </app-textarea-with-lines>
 
         <!-- Botones de Acción -->
         <div class="output-header">
@@ -79,9 +82,11 @@
 
     <div class="input-wrapper">
       <!-- Área de Pseudocódigo para Análisis -->
-      <textarea class="textarea-input" [(ngModel)]="inputCode" rows="10"
+      <app-textarea-with-lines 
+        [(value)]="inputCode" 
+        [rows]="15"
         placeholder="Escribe tu algoritmo aquí o usa el generado arriba...">
-      </textarea>
+      </app-textarea-with-lines>
 
       <!-- Botón de Análisis -->
       <button (click)="onAnalyze()" [disabled]="isLoading || !inputCode.trim() || !isServiceReady"
@@ -340,7 +345,7 @@
 
     <!-- Menú dropdown -->
     <div *ngIf="showExamplesMenu"
-      style="position: absolute; background: white; border: 2px solid #007bff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; max-height: 400px; overflow-y: auto; width: 300px; margin-top: 10px; left: 50%; transform: translateX(-50%);">
+      style="position: absolute; background: white; border: 2px solid #007bff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; max-height: 400px; overflow-y: auto; width: 300px; bottom: 100%; margin-bottom: 10px; left: 50%; transform: translateX(-50%);">
       <div
         style="padding: 10px; border-bottom: 2px solid #007bff; background: #f8f9fa; font-weight: bold; text-align: left;">
         Selecciona un algoritmo:

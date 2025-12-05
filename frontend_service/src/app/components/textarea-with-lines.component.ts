@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -8,10 +8,11 @@ import { FormsModule } from '@angular/forms';
   imports: [CommonModule, FormsModule],
   template: `
     <div class="textarea-wrapper">
-      <div class="line-numbers">
-        <div *ngFor="let line of lineNumbers" class="line-number">{{ line }}</div>
+      <div class="line-numbers" #lineNumbers>
+        <div *ngFor="let line of lineNumbersArray" class="line-number">{{ line }}</div>
       </div>
       <textarea 
+        #textarea
         class="textarea-with-lines"
         [ngModel]="value"
         (ngModelChange)="onValueChange($event)"
@@ -29,10 +30,11 @@ import { FormsModule } from '@angular/forms';
       border-radius: 8px;
       background-color: #fafafa;
       font-family: 'Courier New', monospace;
-      font-size: 1em;
+      font-size: 14px;
       line-height: 1.5;
       overflow: hidden;
       transition: all 0.3s ease;
+      max-height: 500px;
     }
 
     .textarea-wrapper:focus-within {
@@ -42,41 +44,42 @@ import { FormsModule } from '@angular/forms';
     }
 
     .line-numbers {
-      background-color: #f0f0f0;
+      background: linear-gradient(to right, #f8f8f8, #f0f0f0);
       border-right: 2px solid #ddd;
-      padding: 15px 10px;
+      padding: 15px 8px 15px 10px;
       text-align: right;
       user-select: none;
-      color: #999;
+      color: #888;
       font-weight: 600;
-      font-size: 0.9em;
-      min-width: 50px;
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
+      font-size: 14px;
+      min-width: 45px;
+      overflow: hidden;
+      line-height: 1.5;
     }
 
     .line-number {
-      height: 1.5em;
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      padding-right: 8px;
+      height: 21px;
+      padding-right: 5px;
+      transition: color 0.2s ease;
+    }
+
+    .line-number:hover {
+      color: #555;
     }
 
     .textarea-with-lines {
       flex: 1;
-      padding: 15px;
+      padding: 15px 10px;
       border: none;
       outline: none;
       background-color: transparent;
       resize: vertical;
       font-family: 'Courier New', monospace;
-      font-size: 1em;
+      font-size: 14px;
       line-height: 1.5;
       color: #333;
-      overflow: hidden;
-      line-height: 1.5;
+      overflow-y: auto;
+      overflow-x: auto;
     }
 
     .textarea-with-lines:disabled {
@@ -85,10 +88,9 @@ import { FormsModule } from '@angular/forms';
       opacity: 0.7;
       color: #666;
     }
-  `],
-  changeDetection: ChangeDetectionStrategy.OnPush
+  `]
 })
-export class TextareaWithLinesComponent {
+export class TextareaWithLinesComponent implements OnInit, OnChanges {
   @Input() value: string = '';
   @Input() rows: number = 10;
   @Input() disabled: boolean = false;
@@ -96,10 +98,16 @@ export class TextareaWithLinesComponent {
   
   @Output() valueChange = new EventEmitter<string>();
 
-  lineNumbers: number[] = [];
+  lineNumbersArray: number[] = [];
 
   ngOnInit() {
     this.updateLineNumbers();
+  }
+
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['value']) {
+      this.updateLineNumbers();
+    }
   }
 
   onValueChange(newValue: string) {
@@ -109,14 +117,15 @@ export class TextareaWithLinesComponent {
   }
 
   onScroll(event: any) {
-    const lineNumbersDiv = event.target.parentElement?.querySelector('.line-numbers');
+    const textarea = event.target;
+    const lineNumbersDiv = textarea.parentElement?.querySelector('.line-numbers');
     if (lineNumbersDiv) {
-      lineNumbersDiv.scrollTop = event.target.scrollTop;
+      lineNumbersDiv.scrollTop = textarea.scrollTop;
     }
   }
 
   updateLineNumbers() {
-    const lineCount = (this.value.match(/\n/g) || []).length + 1;
-    this.lineNumbers = Array.from({ length: lineCount }, (_, i) => i + 1);
+    const lineCount = this.value ? (this.value.match(/\n/g) || []).length + 1 : 1;
+    this.lineNumbersArray = Array.from({ length: lineCount }, (_, i) => i + 1);
   }
 }

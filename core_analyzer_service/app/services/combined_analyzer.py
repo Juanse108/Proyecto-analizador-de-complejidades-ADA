@@ -21,6 +21,7 @@ from ..ast_classifier import classify_algorithm
 from ..iterative.api import analyze_iterative_program, serialize_line_costs
 from ..recursive import analyze_recursive_function
 from ..domain.recurrence import RecurrenceRelation, RecursiveAnalysisResult
+from ..domain.summation_builder import analyze_nested_loops, format_summation_equation
 from ..domain.expr import (
     Expr,
     add,
@@ -154,39 +155,30 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
 
         big_o = big_o_str_from_expr(result.worst)
         big_omega = big_omega_str_from_expr(result.best)
-        theta = big_o if big_o == big_omega else None
+        
+        # CORRECCIÓN: Theta es el tight bound solo cuando O y Ω son iguales
+        # Si son diferentes, usar el average case si está disponible, sino None
+        if big_o == big_omega:
+            theta = big_o
+        elif result.avg is not None:
+            # Caso promedio disponible: usar para theta
+            theta = big_o_str_from_expr(result.avg)
+        else:
+            # Sin average disponible y O ≠ Ω: no hay tight bound definido
+            theta = None
 
         # ✅ NUEVO: Generar strong_bounds corregido
         strong_bounds = _generate_strong_bounds_fixed(result.worst, name="T(n)")
 
-        # ✅ NUEVO: Generar sumatorias explícitas
-        from ..domain.ast_utils import extract_main_body
-
-        main_body = extract_main_body(ast)
-        summation_analysis = analyze_nested_loops(main_body)
-
-        # Formatear ecuaciones de sumatorias (texto plano, multilinea)
-        summations = {
-            "worst": format_summation_equation(
-                "worst",
-                summation_analysis.worst_summation,
-                summation_analysis.worst_simplified,
-                summation_analysis.worst_polynomial,
-            ),
-            "best": format_summation_equation(
-                "best",
-                summation_analysis.best_summation,
-                summation_analysis.best_simplified,
-                summation_analysis.best_polynomial,
-            ),
-        }
-        if summation_analysis.avg_summation:
-            summations["avg"] = format_summation_equation(
-                "avg",
-                summation_analysis.avg_summation,
-                summation_analysis.avg_simplified,
-                summation_analysis.avg_polynomial,
-            )
+        # ✅ MEJORADO: Generar sumatorias basadas en las expresiones REALES de complejidad
+        from ..domain.summation_builder import generate_summations_from_expressions
+        
+        # Obtener strings de las expresiones de complejidad
+        summations = generate_summations_from_expressions(
+            worst_expr=big_o,
+            best_expr=big_omega,
+            avg_expr=theta if theta else None
+        )
 
         # ✅ NUEVO: Añadir texto a líneas usando SourceMapper
         public_lines = serialize_line_costs(result.lines)
@@ -199,7 +191,50 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
 
         # Notas sin duplicar sumatorias (la UI tiene una sección propia para ellas)
         notes_list = [f"Análisis iterativo. Objetivo: {req.objective}."]
-
+        
+        # Añadir información sobre patrones detectados
+        if getattr(result, "binary_search_detected", False):
+            notes_list.append(
+                "Patrón detectado: Búsqueda Binaria. "
+                "Peor caso O(log n), mejor caso Ω(1), caso promedio Θ(log n)."
+            )
+        
+        # 🆕 NUEVO: Serializar traza de ejecución si existe
+        print(f"\n🔍 DEBUG: Verificando execution_trace en result...")
+        print(f"   hasattr(result, 'execution_trace'): {hasattr(result, 'execution_trace')}")
+        if hasattr(result, 'execution_trace'):
+            print(f"   result.execution_trace is not None: {result.execution_trace is not None}")
+            if result.execution_trace:
+                print(f"   Número de pasos: {len(result.execution_trace.steps)}")
+        
+        execution_trace_dict = None
+        if hasattr(result, 'execution_trace') and result.execution_trace:
+            print(f"✅ GENERANDO execution_trace_dict para la respuesta API...")
+            from ..schemas import ExecutionTrace as ExecutionTraceSchema
+            # Convertir dataclass a Pydantic model
+            trace = result.execution_trace
+            execution_trace_dict = ExecutionTraceSchema(
+                steps=[{
+                    "step": step.step,
+                    "line": step.line,
+                    "kind": step.kind,
+                    "condition": step.condition,
+                    "variables": step.variables,
+                    "operation": step.operation,
+                    "cost": step.cost,
+                    "cumulative_cost": step.cumulative_cost
+                } for step in trace.steps],
+                total_iterations=trace.total_iterations,
+                max_depth=trace.max_depth,
+                variables_tracked=trace.variables_tracked,
+                complexity_formula=trace.complexity_formula,
+                description=trace.description
+            )
+        print(f"\n📦 CONSTRUYENDO RESPUESTA FINAL:")
+        print(f"   - algorithm_kind: iterative")
+        print(f"   - big_o: {big_o}")
+        print(f"   - execution_trace incluido: {execution_trace_dict is not None}")
+        
         return analyzeAstResp(
             algorithm_kind="iterative",
             big_o=big_o,
@@ -212,7 +247,8 @@ def analyze_ast_core(req: AnalyzeAstReq) -> analyzeAstResp:
             lines=public_lines,
             notes=" | ".join(notes_list),
             method_used=method_used,
-            summations=summations,  # 👈 IMPORTANTE: se expone summations para el front
+            summations=summations,
+            execution_trace=execution_trace_dict,
         )
 
 
