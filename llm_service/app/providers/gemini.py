@@ -1,25 +1,13 @@
-# app/providers/gemini.py
+# llm_service/app/providers/gemini.py (CORREGIDO CON NORMALIZACIÓN)
 """
 Proveedor Gemini para normalizar lenguaje natural → pseudocódigo
 compatible con la gramática de `pseudocode.lark`.
 
-Responsabilidades principales:
-- Construir el prompt de sistema con las reglas estrictas del dialecto
-  de pseudocódigo soportado por el parser.
-- Llamar al modelo Gemini 2.0 (con cadena de fallbacks y reintentos).
-- Extraer y validar el JSON devuelto por el modelo.
-- Postprocesar el pseudocódigo para alinearlo con el dialecto real
-  esperado por la gramática (sin cambiar la lógica del algoritmo).
-- Devolver un `ToGrammarResponse` con el pseudocódigo final y un
-  registro de issues / decisiones tomadas.
-
-Este módulo NO implementa todavía:
-- recurrence
-- classify
-- compare
-
-Esas operaciones están declaradas en la interfaz, pero levantan
-`NotImplementedError`.
+CORRECCIONES APLICADAS:
+- ✅ Normalización de complejidades antes de enviar al LLM
+- ✅ Comparación normalizada después de recibir respuesta
+- ✅ Recálculo correcto del porcentaje de acuerdo
+- ✅ Prevención de falsos negativos ("1" vs "O(1)")
 """
 
 import json
@@ -27,9 +15,11 @@ import re
 import asyncio
 import time
 import random
+import base64
 from typing import Optional, List, Tuple
 
 from google import genai
+import graphviz
 
 from ..schemas import (
     ToGrammarRequest, ToGrammarResponse,
@@ -40,7 +30,44 @@ from ..schemas import (
 from ..config import settings
 
 # ============================================================================
-# 1. PROMPT DEL SISTEMA (ALINEADO CON LA GRAMÁTICA FINAL)
+# FUNCIONES DE NORMALIZACIÓN LOCAL
+# ============================================================================
+
+def normalize_complexity(s: Optional[str]) -> str:
+    """Normaliza strings de complejidad a formato estándar O(...)"""
+    if not s:
+        return "O(?)"
+    s = s.strip()
+    
+    # Extraer el contenido dentro de los paréntesis si existe
+    if s.startswith("O(") or s.startswith("Ω(") or s.startswith("Θ("):
+        # Extraer contenido: "O(log n)" → "log n"
+        content = s[2:-1]  # Quita el primer 2 chars (O/Ω/Θ) y el último )
+        s = content
+    
+    # Normalizar valores comunes
+    if s in ("1", "c", "constant"):
+        return "O(1)"
+    if s == "n":
+        return "O(n)"
+    if s in ("n²", "n^2"):
+        return "O(n²)"
+    if "log" in s.lower():
+        return "O(log n)"
+    
+    # Para cualquier otro caso, envolver en O(...)
+    return f"O({s})"
+
+
+def complexities_match(c1: Optional[str], c2: Optional[str]) -> bool:
+    """Compara dos strings de complejidad normalizándolos primero"""
+    return normalize_complexity(c1) == normalize_complexity(c2)
+
+
+
+
+# ============================================================================
+# 1. PROMPT DEL SISTEMA (sin cambios)
 # ============================================================================
 
 SYSTEM_RULES = r"""
@@ -124,7 +151,7 @@ b) Procedimientos (una o varias definiciones):
        ...
      end
 
-c) Bloque principal (algoritmo “main” sin procedimiento):
+c) Bloque principal (algoritmo "main" sin procedimiento):
    begin
      <sentencias>
    end
@@ -317,27 +344,11 @@ Salida JSON:
 
 
 # ============================================================================
-# 2. SANITIZADORES / POST-PROCESADO DEL PSEUDOCÓDIGO
+# 2. SANITIZADORES / POST-PROCESADO (sin cambios)
 # ============================================================================
 
 def _trim_trailing_orphan_ends(s: str) -> str:
-    """
-    Recorta 'end' huérfanos al final del texto cuando hay más END que BEGIN.
-
-    Estrategia:
-    - Cuenta cuántos BEGIN/begin y END/end hay en todas las líneas.
-    - Mientras sobren END y la última línea sea un END/end aislado, se elimina
-      esa última línea.
-    - No modifica END que estén en medio del código.
-
-    Args:
-        s: Texto completo de pseudocódigo.
-
-    Returns:
-        El mismo texto pero sin 'end' sobrantes al final.
-    """
     lines = s.rstrip().splitlines()
-
     def count_begin_end(ls):
         begins = 0
         ends = 0
@@ -345,360 +356,162 @@ def _trim_trailing_orphan_ends(s: str) -> str:
             begins += len(re.findall(r'\b(BEGIN|begin)\b', ln))
             ends += len(re.findall(r'\b(END|end)\b', ln))
         return begins, ends
-
     begins, ends = count_begin_end(lines)
-
-    # Mientras sobren END y la última línea sea solo un END/end, recórtala
     while ends > begins and lines and re.match(r'^\s*(END|end)\s*$', lines[-1]):
         lines.pop()
         begins, ends = count_begin_end(lines)
-
     return "\n".join(lines)
 
-
 def _split_collapsed_keywords(s: str) -> str:
-    """
-    Inserta un salto de línea si 'BEGIN'/'begin' o 'END'/'end' están pegados
-    al siguiente token.
-
-    Ejemplos:
-        'BEGINif'  -> 'BEGIN\\nif'
-        'BEGINn1'  -> 'BEGIN\\nn1'
-        'ENDMERGE' -> 'END\\nMERGE'
-
-    Args:
-        s: Texto de pseudocódigo posiblemente colapsado.
-
-    Returns:
-        Texto con BEGIN/END garantizados como tokens separados.
-    """
     t = s
     t = re.sub(r'(?im)\b(BEGIN|begin)(?=\S)', r'\1\n', t)
     t = re.sub(r'(?im)\b(END|end)(?=\S)', r'\1\n', t)
     return t
 
-
 def _clean_whitespace(s: str) -> str:
-    """
-    Limpia espacios en blanco innecesarios en el pseudocódigo.
-    
-    - Remueve espacios múltiples dentro de líneas (excepto en comentarios)
-    - Remueve espacios al final de líneas
-    - Asegura un solo espacio entre tokens clave
-    
-    Args:
-        s: Pseudocódigo potencialmente con espacios extras.
-        
-    Returns:
-        Pseudocódigo con espacios normalizados.
-    """
     lines = s.split('\n')
     cleaned = []
-    
     for line in lines:
-        # Si es un comentario, conservar como está
         if line.strip().startswith('►'):
             cleaned.append(line.rstrip())
         else:
-            # Reemplazar múltiples espacios con uno solo (excepto indentación al inicio)
-            # Capturar la indentación inicial
             match = re.match(r'^(\s*)', line)
             indent = match.group(1) if match else ''
-            
-            # Limpiar el contenido removiendo espacios múltiples
             content = line[len(indent):].rstrip()
             content = re.sub(r'\s{2,}', ' ', content)
-            
             cleaned.append(indent + content)
-    
     return '\n'.join(cleaned)
 
-
 def _collapse_end_else(s: str) -> str:
-    """
-    Une patrones del tipo:
-
-        end
-        else
-
-    en:
-
-        end else
-
-    para que la gramática (que espera ELSE en la misma línea) lo pueda parsear.
-
-    Solo actúa cuando 'end' y 'else' están en líneas consecutivas con posible
-    espacio en blanco intermedio.
-
-    Args:
-        s: Texto de pseudocódigo.
-
-    Returns:
-        Texto con los patrones end/else normalizados a una sola línea.
-    """
-    return re.sub(
-        r"(?mi)^(\s*end)\s*\n\s*(else)\b",
-        r"\1 \2",
-        s,
-    )
-
+    return re.sub(r"(?mi)^(\s*end)\s*\n\s*(else)\b", r"\1 \2", s)
 
 def _ensure_proc_blocks(s: str) -> str:
-    """
-    Asegura únicamente que cada definición de procedimiento tenga un END de cierre.
-
-    No inserta BEGIN automáticamente (eso se exige en el prompt del sistema).
-
-    Detecta bloques de la forma:
-
-        Nombre(params)
-        begin / BEGIN
-        ... cuerpo ...
-
-    hasta el siguiente encabezado de procedimiento o EOF. Si el cuerpo no termina
-    en END/end, se agrega un END extra en una nueva línea.
-
-    Args:
-        s: Texto de pseudocódigo.
-
-    Returns:
-        Texto con procedimientos cerrados correctamente con END.
-    """
     t = s
-
-    # Detecta bloques de la forma:
-    #   Nombre(params)
-    #   begin / BEGIN
-    #   ...cuerpo...
-    # (hasta el siguiente proc o EOF)
     block_re = re.compile(
         r'(?ms)^(?P<hdr>[A-Za-z_]\w*\s*\([^)]*\)\s*\n(?:BEGIN|begin)\b)(?P<body>.*?)(?=^[A-Za-z_]\w*\s*\(|\Z)'
     )
-
     def _fix_end(m: re.Match) -> str:
         hdr = m.group('hdr')
         body = m.group('body').rstrip()
-
-        # Si ya termina en END/end, lo dejamos tal cual
         if re.search(r'(?mi)\bEND\s*$', body) or re.search(r'(?mi)\bend\s*$', body):
             return hdr + body + "\n"
-
-        # Si no, le agregamos un END de cierre
         return hdr + "\n" + body + "\nEND\n"
-
     return block_re.sub(_fix_end, t)
 
-
 def _normalize_end_else(s: str) -> str:
-    """
-    Normaliza patrones donde 'end' y 'else' están en líneas separadas
-    para que queden en la misma línea: 'end else'.
-    
-    También limpia espacios múltiples entre 'end' y 'else'.
-    
-    Antes:
-        end
-        else
-    
-    Después:
-        end else
-    
-    Variantes manejadas:
-    - end\nelse (salto simple)
-    - end   \n  else (espacios antes/después del salto)
-    - end  else (espacios múltiples)
-    
-    Args:
-        s: Pseudocódigo con posibles patrones end/else separados.
-    
-    Returns:
-        Pseudocódigo con 'end else' normalizado.
-    """
-    # Patrón 1: 'end' seguido de saltos de línea y luego 'else'
-    # Captura espacios opcionales y reemplaza con 'end else'
-    t = re.sub(
-        r'(?m)^\s*(end)\s*\n\s*(else)\b',
-        r'\1 \2',
-        s,
-        flags=re.MULTILINE | re.IGNORECASE
-    )
-    
-    # Patrón 2: 'end' seguido de múltiples espacios y luego 'else' en la misma línea
-    # Reemplaza múltiples espacios con un solo espacio
-    t = re.sub(
-        r'(?i)(end)\s{2,}(else)\b',
-        r'\1 \2',
-        t,
-        flags=re.IGNORECASE
-    )
-    
+    t = re.sub(r'(?m)^\s*(end)\s*\n\s*(else)\b', r'\1 \2', s, flags=re.MULTILINE | re.IGNORECASE)
+    t = re.sub(r'(?i)(end)\s{2,}(else)\b', r'\1 \2', t, flags=re.IGNORECASE)
     return t
 
-
 def _dialect_lint(s: str) -> str:
-    """
-    Aplica una serie de normalizaciones ligeras al pseudocódigo generado
-    por el LLM para acercarlo al dialecto aceptado por `pseudocode.lark`.
-
-    Importante:
-    - No cambia la lógica del algoritmo.
-    - Solo corrige detalles de sintaxis y formato que el modelo suele
-      equivocarse (BEGIN/END duplicados, end-if, líneas sueltas de arreglos, etc.).
-
-    Pasos principales (EN ORDEN):
-    1. Normalizar saltos de línea.
-    2. Limpiar espacios en blanco innecesarios.
-    3. Eliminar palabras clave tipo PROCEDURE / END PROCEDURE.
-    4. Separar BEGIN/END pegados a otros tokens.
-    5. Normalizar 'end-if' / 'end-while' / 'end-for' a 'end'.
-    6. Normalizar 'end' y 'else' a la misma línea: 'end else'.
-    7. Comentar líneas sueltas tipo A[n] que no son sentencias válidas.
-    8. Colapsar BEGIN BEGIN duplicados tras encabezados de procedimiento.
-    9. Asegurar que cada procedimiento tenga BEGIN/END de cierre.
-
-    Args:
-        s: Pseudocódigo generado por el modelo.
-
-    Returns:
-        Pseudocódigo normalizado, listo para ser parseado.
-    """
     t = s
-
-    # 0) Normalizar saltos de línea primero
     t = t.replace("\r\n", "\n").replace("\r", "\n")
-    
-    # 0b) Limpiar espacios en blanco innecesarios
     t = _clean_whitespace(t)
-
-    # 1) PROCEDURE -> quitar
     t = re.sub(r"(?mi)^\s*PROCEDURE\s+([A-Za-z_]\w*)\s*\(", r"\1(", t)
     t = re.sub(r"(?mi)^\s*END\s+PROCEDURE\s*$", "END", t)
-
-    # 2) Dividir cualquier BEGIN/END pegado al siguiente token
     t = _split_collapsed_keywords(t)
-
-    # 3) end-if / end-while / end-for → end (por seguridad)
     t = re.sub(r"(?mi)\bend-(if|while|for)\b", "end", t)
-
-    # 4) ⭐ CRÍTICO: Normalizar 'end' y 'else' en la misma línea
-    # Este paso debe ser ANTES de _ensure_proc_blocks
     t = _normalize_end_else(t)
     t = _collapse_end_else(t)
-
-    # 5) Comentar líneas sueltas tipo A[n]
-    t = re.sub(
-        r"(?m)^\s*[A-Za-z_]\w*\s*\[[^\]\n]+\]\s*$",
-        lambda m: "► " + m.group(0),
-        t,
-    )
-
-    # 6) Colapsar BEGIN BEGIN duplicados tras encabezado de proc
-    t = re.sub(
-        r'(?mis)^([A-Za-z_]\w*\s*\([^)]*\)\s*\n)\s*(BEGIN|begin)\s*\n\s*(BEGIN|begin)\b',
-        r'\1begin\n',
-        t
-    )
-
-    # 7) Asegurar que cada proc tenga BEGIN/END propios
+    t = re.sub(r"(?m)^\s*[A-Za-z_]\w*\s*\[[^\]\n]+\]\s*$", lambda m: "► " + m.group(0), t)
+    t = re.sub(r'(?mis)^([A-Za-z_]\w*\s*\([^)]*\)\s*\n)\s*(BEGIN|begin)\s*\n\s*(BEGIN|begin)\b', r'\1begin\n', t)
     t = _ensure_proc_blocks(t)
-
-    # 8) Aplicar una segunda pasada de _normalize_end_else por si acaso
-    # (a veces el _ensure_proc_blocks puede crear nuevas líneas)
     t = _normalize_end_else(t)
-
     return t.strip()
 
 
 # ============================================================================
-# 3. UTILIDADES DE EXTRACCIÓN / LIMPIEZA
+# 3. UTILIDADES DE EXTRACCIÓN / LIMPIEZA (sin cambios)
 # ============================================================================
 
 _JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 
-
 def _extract_json(raw: str) -> dict:
-    """
-    Extrae el primer objeto JSON del texto devuelto por el modelo.
-
-    Intenta primero parsear toda la respuesta como JSON; si falla, busca
-    el primer patrón `{ ... }` con una regex y lo intenta parsear.
-
-    Args:
-        raw: Texto bruto devuelto por el LLM.
-
-    Returns:
-        Diccionario Python correspondiente al JSON encontrado.
-
-    Raises:
-        ValueError: Si no se encuentra ningún objeto JSON válido.
-        json.JSONDecodeError: Si el contenido `{...}` encontrado no es JSON válido.
-    """
     raw = (raw or "").strip()
-
-    # Intento directo: la respuesta completa es un JSON
     if raw.startswith("{") and raw.endswith("}"):
         try:
             return json.loads(raw)
         except Exception:
             pass
-
-    # Búsqueda por regex del primer {...}
     m = _JSON_PATTERN.search(raw)
     if not m:
         raise ValueError(f"Respuesta no-JSON del LLM. raw={raw[:160]}...")
     return json.loads(m.group(0))
 
-
 def _clean(s: str) -> str:
-    """
-    Normaliza saltos de línea y convierte los escapes literales '\\n'
-    en saltos de línea reales.
-
-    Útil porque el modelo devuelve el pseudocódigo dentro de un JSON,
-    donde los saltos aparecen como '\\n'.
-
-    Args:
-        s: Texto con posibles '\\n' literales y terminadores CRLF/CR.
-
-    Returns:
-        Texto limpio, con saltos de línea '\n' y sin espacios extra en extremos.
-    """
     s = s or ""
-    # 1) Pasar los '\\n' que vienen dentro del JSON del modelo a saltos reales
     s = s.replace("\\n", "\n")
-    # 2) Normalizar CRLF/CR
     return s.replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
 # ============================================================================
-# 4. PROVIDER GEMINI
+# 4. FUNCIONES AUXILIARES PARA GRAPHVIZ
+# ============================================================================
+
+def dot_to_svg(dot_string: str) -> str:
+    """
+    Convierte una definición Graphviz DOT a SVG base64.
+    
+    Args:
+        dot_string: Definición del grafo en formato DOT
+        
+    Returns:
+        SVG como string base64 para embeber directamente en HTML
+    """
+    try:
+        g = graphviz.Source(dot_string, format='svg')
+        svg_bytes = g.pipe()
+        svg_base64 = base64.b64encode(svg_bytes).decode('utf-8')
+        return f"data:image/svg+xml;base64,{svg_base64}"
+    except Exception as e:
+        print(f"❌ [dot_to_svg] Error al convertir DOT a SVG: {str(e)}")
+        return ""
+
+def build_dot_tree(node: dict, graph: graphviz.Digraph) -> None:
+    """
+    Construye recursivamente un grafo Graphviz desde una estructura de árbol.
+    
+    Args:
+        node: Nodo del árbol con estructura {cost, level, children: [...]}
+        graph: Objeto graphviz.Digraph para acumular el grafo
+    """
+    node_id = f"node_{id(node)}"
+    cost = str(node.get("cost", "?"))
+    level = node.get("level", 0)
+    
+    # Colorear según profundidad
+    colors = ["#4A90E2", "#7ED321", "#F5A623", "#BD10E0", "#50E3C2", "#FF6B6B"]
+    color = colors[min(level, len(colors) - 1)]
+    
+    graph.node(node_id, label=cost, style="filled", fillcolor=color, fontcolor="white", fontsize="12")
+    
+    # Agregar hijos recursivamente
+    children = node.get("children", [])
+    for child in children:
+        child_id = f"node_{id(child)}"
+        build_dot_tree(child, graph)
+        graph.edge(node_id, child_id)
+
+
+# ============================================================================
+# 4. PROVIDER GEMINI (CON CORRECCIONES)
 # ============================================================================
 
 class GeminiProvider:
     """
-    Proveedor concreto que usa Google Gemini 2.0 para:
-
-    - `to_grammar`: convertir texto en lenguaje natural a pseudocódigo
-      compatible con la gramática `pseudocode.lark`.
-
-    Notas:
-    - Usa una cadena de modelos de la familia `gemini-2.0-*` definida en
-      variables de entorno (modelo principal + fallbacks).
-    - Implementa reintentos exponenciales ante errores 429 / 5xx / UNAVAILABLE.
-    - Si no hay api key configurada, retorna un pseudocódigo mínimo con
-      `begin/end` envolviendo el texto original.
-
-    Los métodos `recurrence`, `classify` y `compare` están declarados pero
-    todavía no implementados.
+    Proveedor Gemini 2.0 con normalización de complejidades integrada.
+    
+    CORRECCIONES APLICADAS:
+    - ✅ Normaliza complejidades antes de enviar al LLM
+    - ✅ Compara usando complexities_match() después de recibir respuesta
+    - ✅ Recalcula porcentaje de acuerdo correctamente
     """
 
     def __init__(self) -> None:
-        # Modelo principal tomado de settings, restringido a familia Gemini 2.0
         self.model_name = settings.GEMINI_MODEL
         self.api_key: Optional[str] = settings.GEMINI_API_KEY
         self.timeout = settings.GEMINI_TIMEOUT
 
-        # Cadena de modelos: principal + fallbacks (desde .env), SOLO gemini-2.0-*
         fb = [m.strip() for m in (settings.LLM_FALLBACK_MODELS or "").split(",") if m.strip()]
         seen = set()
         all_models: List[str] = []
@@ -707,43 +520,20 @@ class GeminiProvider:
                 seen.add(m)
                 all_models.append(m)
 
-        # Filtrar cualquier cosa que no sea familia 2.0
         self.models_chain: List[str] = [m for m in all_models if m.startswith("gemini-2.0")]
         if not self.models_chain:
-            # Fallback duro por si alguien pasa un modelo incorrecto por env
             self.models_chain = ["gemini-2.0-flash"]
 
-        # Aseguramos que model_name también sea 2.0
         self.model_name = self.models_chain[0]
-
         self.retry_max = settings.LLM_RETRY_MAX
         self.retry_base = settings.LLM_RETRY_BASE
-
         self.client: Optional[genai.Client] = genai.Client(api_key=self.api_key) if self.api_key else None
 
     # ----------------------------------------------------------------------
-    # 4.1. Conversión a gramática (texto → pseudocódigo)
+    # 4.1. Conversión a gramática (sin cambios)
     # ----------------------------------------------------------------------
 
     async def to_grammar(self, req: ToGrammarRequest) -> ToGrammarResponse:
-        """
-        Convierte lenguaje natural en pseudocódigo que respete la gramática
-        `pseudocode.lark`, usando el modelo Gemini 2.0.
-
-        Flujo:
-        1. Si no hay `GEMINI_API_KEY`, retorna un bloque mínimo con begin/end
-           alrededor del texto original (fallback "bruto").
-        2. Si hay cliente, delega en `_to_grammar_sync` ejecutado en un thread
-           para no bloquear el event loop.
-
-        Args:
-            req: Petición con el texto original y pistas opcionales (`hints`).
-
-        Returns:
-            `ToGrammarResponse` con:
-            - `pseudocode_normalizado`: pseudocódigo final postprocesado.
-            - `issues`: lista de strings con decisiones, errores y metadatos.
-        """
         if not self.client:
             return ToGrammarResponse(
                 pseudocode_normalizado=f"begin\n{req.text.strip()}\nend",
@@ -752,29 +542,8 @@ class GeminiProvider:
         return await asyncio.to_thread(self._to_grammar_sync, req)
 
     def _to_grammar_sync(self, req: ToGrammarRequest) -> ToGrammarResponse:
-        """
-        Implementación síncrona de `to_grammar`.
-
-        Construye el prompt final con:
-        - Reglas del sistema (`SYSTEM_RULES`).
-        - Ejemplos (`EXAMPLE_PAIR`).
-        - Entrada real + pistas del usuario.
-        - Instrucción de responder SOLO con JSON.
-
-        Recorre la cadena de modelos (`self.models_chain`) hasta que uno
-        responda con un JSON válido. Si todos fallan, devuelve un bloque
-        mínimo begin/end con issues explicando cada fallo.
-
-        Args:
-            req: Petición original.
-
-        Returns:
-            `ToGrammarResponse` con pseudocódigo normalizado e issues.
-        """
         issues: List[str] = []
         user_hints = f"\nPistas: {req.hints}\n" if req.hints else ""
-
-        # Prompt final enviado al modelo
         prompt = (
             SYSTEM_RULES
             + EXAMPLE_PAIR
@@ -783,7 +552,6 @@ class GeminiProvider:
             + user_hints
             + "\nResponde SOLO con el JSON:"
         )
-
         attempted: List[str] = []
 
         for model_name in self.models_chain:
@@ -791,18 +559,14 @@ class GeminiProvider:
             try:
                 raw, attempts = self._call_with_retries(model_name, prompt)
                 data = _extract_json(raw)
-
                 pseudo = _clean((data.get("pseudocode_normalizado") or "").strip())
 
                 if not pseudo:
-                    # Fallback mínimo si el JSON no trae el campo esperado
                     pseudo = f"begin\n{req.text.strip()}\nend"
                     issues.append(f"[{model_name}] JSON sin 'pseudocode_normalizado'. Se aplicó fallback.")
                 else:
-                    # Ajustes ligeros para acercar al dialecto definido por la gramática
                     pseudo = _dialect_lint(pseudo)
 
-                # issues devueltos por el modelo (si alguno)
                 issues.extend(data.get("issues") or [])
                 issues.insert(0, f"modelo_usado={model_name}, intentos={attempts}")
                 if len(attempted) > 1:
@@ -814,10 +578,8 @@ class GeminiProvider:
                 )
 
             except Exception as e:
-                # Guardamos el error pero seguimos con el siguiente modelo de fallback
                 issues.append(f"[{model_name}] {type(e).__name__}: {e}")
 
-        # Si TODOS los modelos fallan, devolvemos una envoltura segura + reporte
         issues.insert(0, f"todos_fallaron_intentados={attempted}")
         return ToGrammarResponse(
             pseudocode_normalizado=f"begin\n{req.text.strip()}\nend",
@@ -825,38 +587,13 @@ class GeminiProvider:
         )
 
     def _call_with_retries(self, model_name: str, prompt: str) -> Tuple[str, int]:
-        """
-        Llama al modelo Gemini con reintentos exponenciales ante fallos.
-
-        Se considera reintentable cuando el mensaje de error contiene:
-        - " 429", " 500", " 502", " 503", " 504" o "UNAVAILABLE"
-        - o texto que indique indisponibilidad temporal ("temporarily")
-
-        Para cada intento:
-        - Si hay texto de respuesta, se devuelve.
-        - Si la respuesta está vacía o el error no es reintentable, se aborta
-          y se lanza la excepción.
-
-        Args:
-            model_name: Nombre del modelo Gemini 2.0 a usar.
-            prompt: Prompt completo a enviar.
-
-        Returns:
-            Tupla `(texto_respuesta, intentos_usados)`.
-
-        Raises:
-            La última excepción capturada si todos los reintentos fallan.
-        """
         attempts = 0
         last_err: Optional[Exception] = None
 
         for attempt in range(self.retry_max + 1):
             attempts = attempt + 1
             try:
-                resp = self.client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
+                resp = self.client.models.generate_content(model=model_name, contents=prompt)
                 text = (resp.text or "").strip()
                 if not text:
                     raise RuntimeError("Respuesta vacía del modelo")
@@ -878,58 +615,14 @@ class GeminiProvider:
         raise last_err or RuntimeError("Fallo desconocido en llamada al modelo")
 
     # ----------------------------------------------------------------------
-    # 4.2. Otros endpoints (todavía no implementados)
+    # 4.2. Comparación con Normalización (CORREGIDO) 🔧
     # ----------------------------------------------------------------------
-
-    async def recurrence(self, req: RecurrenceRequest) -> RecurrenceResponse:
-        """
-        (Pendiente de implementación).
-
-        En el futuro este método podrá usar Gemini para:
-        - Analizar recurrencias y sugerir soluciones (T(n), etc.).
-        - Clasificar el tipo de recurrencia (divide & conquer, DP, etc.).
-
-        Actualmente lanza NotImplementedError.
-        """
-        raise NotImplementedError("recurrence (Gemini) pendiente")
-
-    async def classify(self, req: ClassifyRequest) -> ClassifyResponse:
-        """
-        (Pendiente de implementación).
-
-        En el futuro este método podrá usar Gemini para:
-        - Clasificar el tipo de algoritmo / patrón con base en su pseudocódigo.
-        - Identificar si es recursivo, iterativo, divide & conquer, DP, etc.
-
-        Actualmente lanza NotImplementedError.
-        """
-        raise NotImplementedError("classify (Gemini) pendiente")
-
-    async def compare(self, req: CompareRequest) -> CompareResponse:
-        """
-        (Pendiente de implementación).
-
-        En el futuro este método podrá usar Gemini para:
-        - Comparar dos algoritmos (en pseudocódigo) y describir diferencias.
-        - Evaluar ventajas / desventajas a alto nivel.
-
-        Actualmente lanza NotImplementedError.
-        """
-        raise NotImplementedError("compare (Gemini) pendiente")
 
     async def compare_analysis(self, pseudocode: str, analyzer_result: dict) -> dict:
         """
         Compara el análisis del LLM con el del analyzer del backend.
         
-        El LLM analiza el pseudocódigo de forma independiente y compara
-        sus resultados con los del analyzer automático.
-        
-        Args:
-            pseudocode: Pseudocódigo a analizar
-            analyzer_result: Dict con {big_o, big_omega, theta} del analyzer
-            
-        Returns:
-            Dict con análisis LLM, comparación y resumen
+        🔧 CORRECCIÓN: Normaliza valores antes de enviar y después de recibir.
         """
         if not self.client:
             return {
@@ -954,11 +647,29 @@ class GeminiProvider:
 
     def _compare_analysis_sync(self, pseudocode: str, analyzer_result: dict) -> dict:
         """
-        Implementación síncrona de compare_analysis.
-        """
-        # Extraer líneas del pseudocódigo
-        lines = pseudocode.strip().split('\n')
+        Implementación síncrona con normalización integrada.
         
+        🔧 CORRECCIONES APLICADAS:
+        1. Normaliza big_o, big_omega, theta ANTES de construir el prompt
+        2. Compara usando complexities_match() DESPUÉS de recibir respuesta
+        3. Recalcula porcentaje de acuerdo correctamente
+        """
+        # 🆕 PASO 1: NORMALIZAR VALORES DEL ANALYZER
+        print("\n🔧 [NORMALIZACIÓN] Normalizando valores del analyzer...")
+        
+        big_o_raw = analyzer_result.get('big_o', 'N/A')
+        big_omega_raw = analyzer_result.get('big_omega', 'N/A')
+        theta_raw = analyzer_result.get('theta', 'N/A')
+        
+        big_o_norm = normalize_complexity(big_o_raw)
+        big_omega_norm = normalize_complexity(big_omega_raw)
+        theta_norm = normalize_complexity(theta_raw)
+        
+        print(f"   Analyzer O(n):  '{big_o_raw}' → '{big_o_norm}'")
+        print(f"   Analyzer Ω(n):  '{big_omega_raw}' → '{big_omega_norm}'")
+        print(f"   Analyzer Θ(n):  '{theta_raw}' → '{theta_norm}'")
+        
+        # Construir prompt con valores NORMALIZADOS
         comparison_prompt = f"""Eres un experto en análisis de complejidad algorítmica. 
 Tu tarea es analizar el siguiente pseudocódigo y comparar tu análisis con el resultado 
 proporcionado por un analyzer automático.
@@ -971,9 +682,9 @@ PSEUDOCÓDIGO A ANALIZAR:
 ```
 
 RESULTADO DEL ANALYZER (que queremos verificar):
-- O(n): {analyzer_result.get('big_o', 'N/A')}
-- Ω(n): {analyzer_result.get('big_omega', 'N/A')}
-- Θ(n): {analyzer_result.get('theta', 'N/A')}
+- O(n): {big_o_norm}
+- Ω(n): {big_omega_norm}
+- Θ(n): {theta_norm}
 
 ANÁLISIS LÍNEA POR LÍNEA DEL ANALYZER (si disponible):
 """
@@ -1048,6 +759,37 @@ Responde SOLO con un JSON válido, sin explicaciones adicionales. Estructura exa
                 # Validar estructura
                 if not result["llm_analysis"] or not result["comparison"]:
                     raise ValueError("Estructura incompleta en respuesta")
+                
+                # 🔧 CORRECCIÓN CRÍTICA: Re-calcular matches normalizados
+                # El LLM podría devolver "O(n²)" pero analyzer "n^2"
+                # complexities_match() normaliza ambos antes de comparar
+                llm_big_o = result["llm_analysis"].get("big_o", "N/A")
+                llm_big_omega = result["llm_analysis"].get("big_omega", "N/A")
+                llm_theta = result["llm_analysis"].get("theta", "N/A")
+                
+                print(f"\n✅ [COMPARACIÓN NORMALIZADA]")
+                print(f"   Big-O:   '{big_o_norm}' vs '{llm_big_o}' → match={complexities_match(big_o_norm, llm_big_o)}")
+                print(f"   Big-Ω:   '{big_omega_norm}' vs '{llm_big_omega}' → match={complexities_match(big_omega_norm, llm_big_omega)}")
+                print(f"   Big-Θ:   '{theta_norm}' vs '{llm_theta}' → match={complexities_match(theta_norm, llm_theta)}")
+                
+                # DEBUG: Mostrar valores crudos
+                print(f"\n🔍 [DEBUG] Valores antes de normalización:")
+                print(f"   Analyzer O: '{big_o_raw}' → Analyzer Ω: '{big_omega_raw}'")
+                print(f"   LLM O: '{llm_big_o}' → LLM Ω: '{llm_big_omega}'")
+                
+                # Actualizar los flags de match usando comparación normalizada
+                result["comparison"]["big_o_match"] = complexities_match(big_o_norm, llm_big_o)
+                result["comparison"]["big_omega_match"] = complexities_match(big_omega_norm, llm_big_omega)
+                result["comparison"]["theta_match"] = complexities_match(theta_norm, llm_theta)
+                
+                # Recalcular overall_agreement
+                matches = sum([
+                    result["comparison"]["big_o_match"],
+                    result["comparison"]["big_omega_match"],
+                    result["comparison"]["theta_match"] if result["comparison"].get("theta_match") is not None else 0
+                ])
+                total = 3 if result["comparison"].get("theta_match") is not None else 2
+                result["comparison"]["overall_agreement"] = int((matches / total) * 100) if total > 0 else 0
 
                 return result
 
@@ -1072,6 +814,477 @@ Responde SOLO con un JSON válido, sin explicaciones adicionales. Estructura exa
             },
             "summary": "Error al completar la comparación"
         }
+
+    async def analyze_recursion_tree(
+        self,
+        pseudocode: str,
+        big_o: str,
+        recurrence_equation: Optional[str] = None,
+        ir_worst: Optional[dict] = None
+    ) -> dict:
+        """
+        🆕 Genera un árbol de recursión PROFUNDO y REAL analizando el pseudocódigo con LLM.
+        """
+        print("\n" + "="*80)
+        print("🚀 [analyze_recursion_tree] INICIANDO generación de árbol profundo")
+        print(f"📝 Pseudocódigo ({len(pseudocode)} chars): {pseudocode[:80]}...")
+        print(f"🎯 BigO: {big_o}")
+        print(f"📐 Recurrence: {recurrence_equation}")
+        print("="*80)
+        
+        if not pseudocode.strip():
+            raise ValueError("El pseudocódigo no puede estar vacío")
+
+        issues: List[str] = []
+        
+        # Detectar tipo de recursión para dar contexto mejor
+        is_fibonacci = 'fib' in pseudocode.lower()
+        is_factorial = 'fact' in pseudocode.lower()
+        is_mergesort = 'merge' in pseudocode.lower()
+        is_quicksort = 'quick' in pseudocode.lower()
+        is_binary_search = 'binarysearch' in pseudocode.lower() or 'binary_search' in pseudocode.lower()
+        is_backtracking = 'backtrack' in pseudocode.lower()
+        
+        print(f"🔍 Tipo detectado - Fibonacci: {is_fibonacci}, Factorial: {is_factorial}, MergeSort: {is_mergesort}, QuickSort: {is_quicksort}, BinarySearch: {is_binary_search}, Backtracking: {is_backtracking}")
+        
+        tree_prompt = f"""🌳 GENERADOR DE ÁRBOLES DE RECURSIÓN - PROFUNDIDAD OBLIGATORIA
+
+Eres un experto en visualización de algoritmos. Tu ÚNICA tarea es generar un árbol de recursión 
+COMPLETAMENTE EXPANDIDO mostrando TODOS los niveles hasta las hojas.
+
+ALGORITMO A ANALIZAR:
+```
+{pseudocode.strip()}
+```
+
+COMPLEJIDAD: {big_o}
+RECURRENCIA: {recurrence_equation if recurrence_equation else 'No disponible'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTRUCCIONES OBLIGATORIAS - CUMPLE TODAS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 DETECTA EL PATRÓN Y SIGUE ESTAS REGLAS AL PIE DE LA LETRA:
+
+🔴 FIBONACCI (fib(n) = fib(n-1) + fib(n-2)):
+   ✓ MÍNIMO 5-6 NIVELES (no 2!)
+   ✓ Cada nodo SIEMPRE tiene 2 hijos EXCEPTO hojas (fib(0), fib(1))
+   ✓ Estructura: fib(5) → [fib(4), fib(3)] → [fib(3), fib(2), fib(2), fib(1)] → ...
+   ✓ Expandir TODAS las ramas: fib(4)→fib(3), fib(3)→fib(2), fib(2)→fib(1), etc.
+   ✓ Altura REAL: ~5 para fib(5), ~6 para fib(6)
+   ✓ EJEMPLO CORRECTO (mínimo 4 niveles):
+     fib(5)
+     ├─ fib(4)
+     │  ├─ fib(3)
+     │  │  ├─ fib(2)
+     │  │  │  ├─ fib(1)
+     │  │  │  └─ fib(0)
+     │  │  └─ fib(1)
+     │  └─ fib(2)
+     │     ├─ fib(1)
+     │     └─ fib(0)
+     └─ fib(3)
+        ├─ fib(2)
+        │  ├─ fib(1)
+        │  └─ fib(0)
+        └─ fib(1)
+
+🔴 FACTORIAL, QUICKSORT PEOR CASO (cadena lineal n→n-1→n-2):
+   ✓ MÍNIMO 5-6 NIVELES (no 2!)
+   ✓ Cada nodo SOLO 1 hijo (cadena vertical)
+   ✓ fact(5) → fact(4) → fact(3) → fact(2) → fact(1) → fact(0)
+   ✓ Altura: ~5-6 (el número inicial)
+   ✓ NUNCA dejes children vacías si hay más niveles
+
+🔴 MERGESORT, QUICKSORT BALANCEADO (divide en 2):
+   ✓ MÍNIMO 4-5 NIVELES (no 2!)
+   ✓ Cada nodo tiene 2 hijos hasta log₂(n) niveles
+   ✓ Nivel 0: n → Nivel 1: n/2, n/2 → Nivel 2: n/4, n/4, n/4, n/4 → ...
+   ✓ Continúa hasta elementos de tamaño 1
+   ✓ Altura: log₂(n) ≈ 4-5 para n=32
+
+🔴 BÚSQUEDA BINARIA (cadena logarítmica):
+   ✓ MÍNIMO 4-5 NIVELES (no 2!)
+   ✓ Cada nodo SOLO 1 hijo (similar a factorial)
+   ✓ BS(n) → BS(n/2) → BS(n/4) → BS(n/8) → ... → BS(1)
+   ✓ Altura: log₂(n) ≈ 4-5
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FORMATO JSON OBLIGATORIO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RESPONDE SOLO CON ESTE JSON (SIN EXPLICACIONES ADICIONALES):
+
+{{
+  "tree": {{
+    "root": {{
+      "level": 0,
+      "cost": "fib(5)",
+      "width": 100,
+      "children": [
+        {{
+          "level": 1,
+          "cost": "fib(4)",
+          "width": 50,
+          "children": [
+            {{
+              "level": 2,
+              "cost": "fib(3)",
+              "width": 30,
+              "children": [
+                {{
+                  "level": 3,
+                  "cost": "fib(2)",
+                  "width": 15,
+                  "children": [
+                    {{"level": 4, "cost": "fib(1)", "width": 7, "children": []}},
+                    {{"level": 4, "cost": "fib(0)", "width": 7, "children": []}}
+                  ]
+                }},
+                {{
+                  "level": 3,
+                  "cost": "fib(1)",
+                  "width": 15,
+                  "children": []
+                }}
+              ]
+            }},
+            {{
+              "level": 2,
+              "cost": "fib(2)",
+              "width": 20,
+              "children": [
+                {{"level": 3, "cost": "fib(1)", "width": 10, "children": []}},
+                {{"level": 3, "cost": "fib(0)", "width": 10, "children": []}}
+              ]
+            }}
+          ]
+        }},
+        {{
+          "level": 1,
+          "cost": "fib(3)",
+          "width": 50,
+          "children": [
+            {{
+              "level": 2,
+              "cost": "fib(2)",
+              "width": 25,
+              "children": [
+                {{"level": 3, "cost": "fib(1)", "width": 12, "children": []}},
+                {{"level": 3, "cost": "fib(0)", "width": 12, "children": []}}
+              ]
+            }},
+            {{
+              "level": 2,
+              "cost": "fib(1)",
+              "width": 25,
+              "children": []
+            }}
+          ]
+        }}
+      ]
+    }},
+    "height": "5",
+    "totalCost": "O(2^n)",
+    "description": "Árbol recursivo completo con todos los niveles expandidos"
+  }},
+  "analysis": "Explicación de la estructura del árbol y cómo refleja la recursión"
+}}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VALIDACIÓN FINAL - ANTES DE RESPONDER:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ INCORRECTO: 2 niveles, pocas ramas
+✅ CORRECTO: 5-6 niveles, todas las ramas expandidas
+
+❌ INCORRECTO: children: [] cuando hay más niveles por generar
+✅ CORRECTO: children siempre tienen nodos hasta las hojas
+
+❌ INCORRECTO: "height": "5" pero solo 2 niveles en JSON
+✅ CORRECTO: height coincide con profundidad real del JSON
+
+❌ INCORRECTO: Respuesta con explicaciones o comentarios
+✅ CORRECTO: SOLO JSON válido, nada más
+
+RECUERDA: Tu árbol debe ser VISUALMENTE PROFUNDO cuando se renderice. 
+5-6 niveles MÍNIMO, completamente expandido. NO ABREVIES.
+
+¡AHORA GENERA EL JSON!
+"""
+
+        for model_name in self.models_chain:
+            try:
+                print(f"\n🤖 [analyze_recursion_tree] Intentando con modelo: {model_name}")
+                raw, attempts = self._call_with_retries(model_name, tree_prompt)
+                print(f"✅ [analyze_recursion_tree] Respuesta raw recibida ({len(raw)} chars)")
+                
+                data = _extract_json(raw)
+                print(f"✅ [analyze_recursion_tree] JSON extraído exitosamente")
+                print(f"   - Contiene 'tree': {'tree' in data}")
+                print(f"   - Contiene 'analysis': {'analysis' in data}")
+                
+                if "tree" in data and "analysis" in data:
+                    print(f"✅ [analyze_recursion_tree] Estructura válida - Validando profundidad...")
+                    # Validar que el árbol realmente sea profundo
+                    if self._validate_tree_depth(data["tree"]["root"]):
+                        print(f"✅ [analyze_recursion_tree] ✓ Árbol profundo válido. Generando SVG...")
+                        
+                        # Extraer descripción del árbol generado por el LLM
+                        tree_description = data["tree"].get("description", data.get("analysis", ""))
+                        
+                        # Generar SVG desde el árbol JSON
+                        graph = graphviz.Digraph(comment='Recursion Tree', format='svg')
+                        graph.attr(rankdir='TB')
+                        graph.attr('node', shape='box', style='filled', fillcolor='lightblue')
+                        build_dot_tree(data["tree"]["root"], graph)
+                        svg_data = graph.pipe(format='svg').decode('utf-8')
+                        
+                        # Si el árbol no tiene descripción, generar una basada en el tipo
+                        if not tree_description or tree_description == data.get("analysis", ""):
+                            tree_description = self._generate_tree_description(
+                                pseudocode, big_o, 
+                                is_fibonacci, is_factorial, is_mergesort, is_quicksort, is_binary_search
+                            )
+                            data["tree"]["description"] = tree_description
+                        
+                        data["svg"] = svg_data
+                        print(f"✅ [analyze_recursion_tree] SVG generado ({len(svg_data)} chars). Devolviendo...")
+                        print("="*80 + "\n")
+                        return data
+                    else:
+                        print(f"⚠️ [analyze_recursion_tree] Árbol no tiene suficiente profundidad (min 3). Intentando otro modelo...")
+                    
+            except Exception as e:
+                print(f"❌ [analyze_recursion_tree] Error con {model_name}: {type(e).__name__}: {str(e)}")
+                issues.append(f"[{model_name}] {type(e).__name__}: {str(e)}")
+
+        # Fallback con árbol genérico si falla el LLM
+        print(f"\n⚠️ [analyze_recursion_tree] Todos los modelos fallaron. Usando fallback genérico")
+        print(f"   Errores: {issues[:1]}")
+        print("="*80 + "\n")
+        
+        # Generar árbol de fallback mejorado según el tipo de algoritmo
+        fallback_response = self._generate_fallback_tree(
+            pseudocode, big_o, is_fibonacci, is_factorial, is_mergesort, is_quicksort, is_binary_search
+        )
+        
+        # Generar SVG para fallback
+        try:
+            graph = graphviz.Digraph(comment='Recursion Tree Fallback', format='svg')
+            graph.attr(rankdir='TB')
+            graph.attr('node', shape='box', style='filled', fillcolor='#FFB6C1')
+            build_dot_tree(fallback_response["tree"]["root"], graph)
+            svg_data = graph.pipe(format='svg').decode('utf-8')
+            fallback_response["svg"] = svg_data
+            print(f"✅ [analyze_recursion_tree] SVG fallback generado ({len(svg_data)} bytes)")
+        except Exception as svg_error:
+            print(f"⚠️ [analyze_recursion_tree] Error generando SVG fallback: {svg_error}")
+            fallback_response["svg"] = None
+        
+        return fallback_response
+    
+    def _validate_tree_depth(self, root: dict, min_depth: int = 3) -> bool:
+        """Valida que el árbol tenga suficiente profundidad"""
+        def get_depth(node):
+            if not node.get("children"):
+                return 1
+            return 1 + max(get_depth(child) for child in node["children"])
+        
+        depth = get_depth(root)
+        return depth >= min_depth
+
+    def _generate_tree_description(
+        self, pseudocode: str, big_o: str,
+        is_fib: bool, is_fact: bool, is_merge: bool, is_quick: bool, is_bsearch: bool
+    ) -> str:
+        """Genera una descripción del árbol basada en el tipo de algoritmo"""
+        if is_fib:
+            return "Fibonacci recursivo: Árbol binario donde cada nodo T(n) se divide en T(n-1) y T(n-2). Altura ≈ n. Número de nodos ≈ Φ(φ^n) ≈ O(2^n), donde φ ≈ 1.618 (razón áurea). Por tanto, costo total Θ(φ^n) ≈ O(2^n)."
+        elif is_fact:
+            return "Factorial recursivo: Cadena lineal n → n-1 → n-2 → ... → 1. Altura: n. Trabajo por nivel: O(1). Costo total: O(n)."
+        elif is_merge:
+            return "MergeSort: División balanceada en 2 subproblemas de tamaño n/2. Cada nivel cuesta Θ(n). Con log₂(n) niveles, el costo total es Θ(n log n)."
+        elif is_quick:
+            if 'n²' in big_o or 'n^2' in big_o:
+                return "QuickSort (peor caso): Pivote siempre es el mínimo/máximo. Genera una cadena lineal n → n-1 → n-2 → ... → 1 con altura n. Costo por nivel ≈ n, total Θ(n²)."
+            else:
+                return "QuickSort (mejor/promedio caso): Pivote divide razonablemente. Árbol balanceado con 2 subproblemas de tamaño ≈ n/2. Altura log₂(n). Costo por nivel ≈ n, total Θ(n log n)."
+        elif is_bsearch:
+            return "Binary Search recursivo: Una única rama que reduce el espacio búsqueda a la mitad en cada nivel (n → n/2 → n/4 → ... → 1). Altura: log₂(n). Trabajo por nivel: O(1). Costo total: O(log n)."
+        else:
+            return f"Árbol de recursión generado para algoritmo con complejidad {big_o}."
+
+    def _generate_fallback_tree(self, pseudocode: str, big_o: str, is_fib: bool, is_fact: bool, 
+                                 is_merge: bool, is_quick: bool, is_bsearch: bool) -> dict:
+        """Genera un árbol de fallback realista según el tipo de algoritmo"""
+        
+        if is_fib:
+            # Fibonacci: árbol binario profundo
+            return {
+                "tree": {
+                    "root": {
+                        "level": 0, "cost": "fib(5)", "width": 100,
+                        "children": [
+                            {
+                                "level": 1, "cost": "fib(4)", "width": 50,
+                                "children": [
+                                    {"level": 2, "cost": "fib(3)", "width": 25, "children": [
+                                        {"level": 3, "cost": "fib(2)", "width": 12, "children": [
+                                            {"level": 4, "cost": "fib(1)", "width": 6, "children": []},
+                                            {"level": 4, "cost": "fib(0)", "width": 6, "children": []}
+                                        ]},
+                                        {"level": 3, "cost": "fib(1)", "width": 12, "children": []}
+                                    ]},
+                                    {"level": 2, "cost": "fib(2)", "width": 25, "children": [
+                                        {"level": 3, "cost": "fib(1)", "width": 12, "children": []},
+                                        {"level": 3, "cost": "fib(0)", "width": 12, "children": []}
+                                    ]}
+                                ]
+                            },
+                            {
+                                "level": 1, "cost": "fib(3)", "width": 50,
+                                "children": [
+                                    {"level": 2, "cost": "fib(2)", "width": 25, "children": [
+                                        {"level": 3, "cost": "fib(1)", "width": 12, "children": []},
+                                        {"level": 3, "cost": "fib(0)", "width": 12, "children": []}
+                                    ]},
+                                    {"level": 2, "cost": "fib(1)", "width": 25, "children": []}
+                                ]
+                            }
+                        ]
+                    },
+                    "height": "5", "totalCost": "O(2^n)",
+                    "description": "Fibonacci recursivo: Árbol binario donde cada nodo T(n) se divide en T(n-1) y T(n-2). Altura ≈ n. Número de nodos ≈ Φ(φ^n) ≈ O(2^n), donde φ ≈ 1.618 (razón áurea). Por tanto, costo total Θ(φ^n) ≈ O(2^n)."
+                },
+                "analysis": "Fibonacci genera un árbol binario donde cada nodo (excepto hojas) se divide en dos llamadas recursivas. Altura ≈ n, nodos ≈ 2^n"
+            }
+        
+        elif is_fact:
+            # Factorial: cadena lineal
+            return {
+                "tree": {
+                    "root": {
+                        "level": 0, "cost": "fact(5)", "width": 100,
+                        "children": [{
+                            "level": 1, "cost": "fact(4)", "width": 100,
+                            "children": [{
+                                "level": 2, "cost": "fact(3)", "width": 100,
+                                "children": [{
+                                    "level": 3, "cost": "fact(2)", "width": 100,
+                                    "children": [{
+                                        "level": 4, "cost": "fact(1)", "width": 100,
+                                        "children": [{
+                                            "level": 5, "cost": "fact(0)", "width": 100,
+                                            "children": []
+                                        }]
+                                    }]
+                                }]
+                            }]
+                        }]
+                    },
+                    "height": "6", "totalCost": "O(n)",
+                    "description": "Factorial recursivo: Cadena lineal n → n-1 → n-2 → ... → 1. Altura: n. Trabajo por nivel: O(1). Costo total: O(n)."
+                },
+                "analysis": "Factorial es una cadena lineal de recursión donde cada llamada invoca una sola función. Altura = n, trabajo por nivel = O(1)"
+            }
+        
+        elif is_merge:
+            # MergeSort: árbol balanceado
+            return {
+                "tree": {
+                    "root": {
+                        "level": 0, "cost": "ms(n)", "width": 100,
+                        "children": [
+                            {
+                                "level": 1, "cost": "ms(n/2)", "width": 50,
+                                "children": [
+                                    {"level": 2, "cost": "ms(n/4)", "width": 25, "children": []},
+                                    {"level": 2, "cost": "ms(n/4)", "width": 25, "children": []}
+                                ]
+                            },
+                            {
+                                "level": 1, "cost": "ms(n/2)", "width": 50,
+                                "children": [
+                                    {"level": 2, "cost": "ms(n/4)", "width": 25, "children": []},
+                                    {"level": 2, "cost": "ms(n/4)", "width": 25, "children": []}
+                                ]
+                            }
+                        ]
+                    },
+                    "height": "log n", "totalCost": "O(n log n)",
+                    "description": "MergeSort: División balanceada en 2 subproblemas de tamaño n/2. Cada nivel cuesta Θ(n). Con log₂(n) niveles, el costo total es Θ(n log n)."
+                },
+                "analysis": "MergeSort divide recursivamente en 2 partes iguales. Altura = log n, trabajo por nivel = O(n)"
+            }
+        
+        elif is_quick:
+            # QuickSort: mejor caso balanceado, peor caso lineal
+            return {
+                "tree": {
+                    "root": {
+                        "level": 0, "cost": "qs(n)", "width": 100,
+                        "children": [
+                            {
+                                "level": 1, "cost": "qs(n-1)", "width": 90,
+                                "children": [{
+                                    "level": 2, "cost": "qs(n-2)", "width": 80,
+                                    "children": [{
+                                        "level": 3, "cost": "qs(n-3)", "width": 70,
+                                        "children": []
+                                    }]
+                                }]
+                            }
+                        ]
+                    },
+                    "height": "n", "totalCost": "O(n²) worst",
+                    "description": "QuickSort (peor caso): Pivote siempre es el mínimo/máximo. Genera una cadena lineal n → n-1 → n-2 → ... → 1 con altura n. Costo por nivel ≈ n, total Θ(n²)."
+                },
+                "analysis": "En el peor caso (pivote siempre extremo), QuickSort genera una cadena lineal. Altura = n"
+            }
+        
+        elif is_bsearch:
+            # Binary Search: cadena logarítmica
+            return {
+                "tree": {
+                    "root": {
+                        "level": 0, "cost": "bs(n)", "width": 100,
+                        "children": [{
+                            "level": 1, "cost": "bs(n/2)", "width": 100,
+                            "children": [{
+                                "level": 2, "cost": "bs(n/4)", "width": 100,
+                                "children": [{
+                                    "level": 3, "cost": "bs(n/8)", "width": 100,
+                                    "children": [{
+                                        "level": 4, "cost": "bs(1)", "width": 100,
+                                        "children": []
+                                    }]
+                                }]
+                            }]
+                        }]
+                    },
+                    "height": "log₂ n", "totalCost": "O(log n)",
+                    "description": "Binary Search recursivo: Una única rama que reduce el espacio búsqueda a la mitad en cada nivel (n → n/2 → n/4 → ... → 1). Altura: log₂(n). Trabajo por nivel: O(1). Costo total: O(log n)."
+                },
+                "analysis": "Binary Search reduce el espacio a la mitad en cada nivel. Altura = log₂ n"
+            }
+        
+        else:
+            # Fallback genérico
+            return {
+                "tree": {
+                    "root": {
+                        "level": 0, "cost": big_o, "width": 100,
+                        "children": [{
+                            "level": 1, "cost": "T(...)", "width": 100,
+                            "children": []
+                        }]
+                    },
+                    "height": "?", "totalCost": big_o,
+                    "description": f"Árbol genérico para {big_o}"
+                },
+                "analysis": f"Complejidad: {big_o}"
+            }
 
     async def validate_grammar(self, pseudocode: str) -> dict:
         """

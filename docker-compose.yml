@@ -28,7 +28,7 @@ services:
     ports: ["8003:8003"]
     environment:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-AIzaSyAHecVUUB9dgXHlxqdQeKLB5yk8UVndIuM}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-AIzaSyAuJ96zpZc3l8JeSPEpM9YZkyho8h9gcxE}
       GEMINI_TIMEOUT: ${GEMINI_TIMEOUT:-30}
       LLM_RETRY_MAX: ${LLM_RETRY_MAX:-4}
       LLM_RETRY_BASE: ${LLM_RETRY_BASE:-0.7}

@@ -26,6 +26,27 @@ export interface StrongBounds {
   evaluated_at?: any;
 }
 
+// 🆕 Interfaces para la traza de ejecución iterativa
+export interface TraceStep {
+  step: number;
+  line: number;
+  kind: string;
+  condition?: string;
+  variables: { [key: string]: any };
+  operation: string;
+  cost: string;
+  cumulative_cost: string;
+}
+
+export interface ExecutionTrace {
+  steps: TraceStep[];
+  total_iterations: number;
+  max_depth: number;
+  variables_tracked: string[];
+  complexity_formula: string;
+  description: string;
+}
+
 export interface AnalyzeResponse {
   normalized_code: string;
   big_o: string;
@@ -33,7 +54,7 @@ export interface AnalyzeResponse {
   theta?: string;
   ir?: string;
   notes?: string[];
-  // Nuevos campos
+  
   algorithm_kind?: string;
   ir_worst?: any;
   ir_best?: any;
@@ -46,6 +67,12 @@ export interface AnalyzeResponse {
     best?: string;
     avg?: string;
   };
+  
+  // 🆕 NUEVO CAMPO (recursivo)
+  recurrence_equation?: string;
+  
+  // 🆕 NUEVO CAMPO (iterativo)
+  execution_trace?: ExecutionTrace;
 }
 
 @Injectable({
@@ -65,10 +92,13 @@ export class OrchestratorService {
       objective: objective
     };
 
-    console.log('📤 Enviando al Orchestrator:', payload);
+    console.log('📤 [Orchestrator] Enviando al backend:', payload);
 
     return this.http.post<AnalyzeResponse>(`${this.apiUrl}/analyze`, payload).pipe(
-      catchError(this.handleError)
+      catchError((error) => {
+        console.error('❌ [Orchestrator] Error en respuesta:', error);
+        return this.handleError(error);
+      })
     );
   }
 

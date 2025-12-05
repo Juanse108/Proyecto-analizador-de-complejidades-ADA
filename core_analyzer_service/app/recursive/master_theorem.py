@@ -58,8 +58,10 @@ def solve_master_theorem(rec: RecurrenceRelation) -> Tuple[Expr, int, str]:
         )
         return result, 3, explanation
 
-
 def solve_linear_recurrence(rec: RecurrenceRelation) -> Tuple[Optional[Expr], str]:
+    """
+    Resuelve recurrencias lineales.
+    """
     if rec.b != 1:
         return None, ""
 

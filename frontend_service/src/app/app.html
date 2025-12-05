@@ -39,9 +39,12 @@
 
       <div class="input-wrapper">
         <!-- Área de Pseudocódigo Generado -->
-        <textarea class="pseudocode-output" [value]="generatedPseudocode" rows="8" readonly
+        <app-textarea-with-lines 
+          [value]="generatedPseudocode" 
+          [rows]="15" 
+          [disabled]="true"
           placeholder="El pseudocódigo aparecerá aquí...">
-        </textarea>
+        </app-textarea-with-lines>
 
         <!-- Botones de Acción -->
         <div class="output-header">
@@ -78,21 +81,12 @@
     <h2>🔍 Análisis de Complejidad</h2>
 
     <div class="input-wrapper">
-      <!-- Selector de Objetivo -->
-      <div style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
-        <label style="font-weight: 600; white-space: nowrap;">Tipo de análisis:</label>
-        <select [(ngModel)]="selectedObjective" class="textarea-input"
-          style="flex: 1; height: auto; padding: 8px; border-radius: 4px;">
-          <option value="worst">Peor Caso (Worst Case - O)</option>
-          <option value="best">Mejor Caso (Best Case - Ω)</option>
-          <option value="average">Caso Promedio (Average Case - Θ)</option>
-        </select>
-      </div>
-
       <!-- Área de Pseudocódigo para Análisis -->
-      <textarea class="textarea-input" [(ngModel)]="inputCode" rows="10"
+      <app-textarea-with-lines 
+        [(value)]="inputCode" 
+        [rows]="15"
         placeholder="Escribe tu algoritmo aquí o usa el generado arriba...">
-      </textarea>
+      </app-textarea-with-lines>
 
       <!-- Botón de Análisis -->
       <button (click)="onAnalyze()" [disabled]="isLoading || !inputCode.trim() || !isServiceReady"
@@ -163,15 +157,6 @@
       <h3 style="margin-top: 0; color: #495057;">📋 Representación Interna (IR)</h3>
       <pre
         style="background: #fff; padding: 15px; border-radius: 5px; overflow-x: auto; color: #333; font-family: 'Courier New', monospace; font-size: 0.9em; max-height: 300px;">{{ result.ir | json }}</pre>
-    </div>
-
-    <!-- Notas del Análisis -->
-    <div *ngIf="result.notes && result.notes.length > 0"
-      style="background: #e7f3ff; padding: 20px; border-radius: 10px; border-left: 4px solid #007bff; margin-top: 20px;">
-      <h3 style="margin-top: 0; color: #004085;">📌 Notas del Análisis</h3>
-      <ul style="color: #004085; margin: 0; padding-left: 20px;">
-        <li *ngFor="let note of result.notes" style="margin-bottom: 8px;">{{ note }}</li>
-      </ul>
     </div>
 
     <!-- Botón para comparar con LLM -->
@@ -360,7 +345,7 @@
 
     <!-- Menú dropdown -->
     <div *ngIf="showExamplesMenu"
-      style="position: absolute; background: white; border: 2px solid #007bff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; max-height: 400px; overflow-y: auto; width: 300px; margin-top: 10px; left: 50%; transform: translateX(-50%);">
+      style="position: absolute; background: white; border: 2px solid #007bff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; max-height: 400px; overflow-y: auto; width: 300px; bottom: 100%; margin-bottom: 10px; left: 50%; transform: translateX(-50%);">
       <div
         style="padding: 10px; border-bottom: 2px solid #007bff; background: #f8f9fa; font-weight: bold; text-align: left;">
         Selecciona un algoritmo:

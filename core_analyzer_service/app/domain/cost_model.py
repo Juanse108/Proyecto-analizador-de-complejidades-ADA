@@ -1,7 +1,10 @@
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from dataclasses import dataclass
 
 from .expr import Expr, const, add
+
+if TYPE_CHECKING:
+    from ..iterative.execution_trace import ExecutionTrace
 
 
 COST_MODEL = {
@@ -78,3 +81,6 @@ class ProgramCost:
     best: Expr
     avg: Expr
     lines: List[LineCostInternal]
+    binary_search_detected: bool = False
+    method_used: str = "iteration"
+    execution_trace: Optional['ExecutionTrace'] = None  # 🆕 Traza de ejecución

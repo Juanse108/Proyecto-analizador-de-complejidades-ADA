@@ -171,7 +171,7 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
             all_notes.append(analysis_result.notes)
         else:
             all_notes.extend(analysis_result.notes)
-    
+
     return OrchestratorResponse(
         normalized_code=normalized_code,
         big_o=analysis_result.big_o,
@@ -186,9 +186,10 @@ async def analyze_full_pipeline(req: AnalyzeRequest) -> OrchestratorResponse:
         lines=analysis_result.lines,
         method_used=analysis_result.method_used,
         strong_bounds=analysis_result.strong_bounds,
-        summations=analysis_result.summations
+        summations=analysis_result.summations,
+        recurrence_equation=analysis_result.recurrence_equation,
+        execution_trace=analysis_result.execution_trace,  # 🆕 NUEVO - FORWARDING
     )
-
 
 # ---------------------------------------------------------------------------
 # HELPER: CORRECCIÓN DE FORMATO

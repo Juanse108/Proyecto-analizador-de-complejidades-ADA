@@ -87,6 +87,57 @@ class LineCost(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# 3b. EXECUTION TRACE MODELS (Seguimiento Iterativo)
+# ---------------------------------------------------------------------------
+
+class TraceStep(BaseModel):
+    """
+    Representa un paso en la traza de ejecución de un algoritmo iterativo.
+    
+    Atributos:
+        step: Número de paso en la ejecución
+        line: Línea de código ejecutada
+        kind: Tipo de sentencia
+        condition: Condición evaluada (para bucles/ifs)
+        variables: Estado de las variables en este punto
+        operation: Descripción de la operación realizada
+        cost: Costo de este paso
+        cumulative_cost: Costo acumulado hasta este paso
+    """
+    step: int
+    line: int
+    kind: str
+    condition: Optional[str] = None
+    variables: Dict[str, Any] = Field(default_factory=dict)
+    operation: str = ""
+    cost: str = "1"
+    cumulative_cost: str = "1"
+
+
+class ExecutionTrace(BaseModel):
+    """
+    Traza completa de ejecución de un algoritmo iterativo.
+    
+    Esta es la versión para el seguimiento del pseudocódigo iterativo,
+    equivalente al árbol de recursión para algoritmos recursivos.
+    
+    Atributos:
+        steps: Lista de pasos de la ejecución
+        total_iterations: Total de iteraciones realizadas
+        max_depth: Profundidad máxima de anidamiento alcanzada
+        variables_tracked: Variables rastreadas durante la ejecución
+        complexity_formula: Fórmula de complejidad derivada de la traza
+        description: Explicación textual de la traza
+    """
+    steps: List[TraceStep]
+    total_iterations: int
+    max_depth: int
+    variables_tracked: List[str]
+    complexity_formula: str
+    description: str = ""
+
+
+# ---------------------------------------------------------------------------
 # 4. STRONG BOUNDS (COTAS FUERTES)
 # ---------------------------------------------------------------------------
 
@@ -129,16 +180,20 @@ class StrongBounds(BaseModel):
 # 5. RESPONSE MODELS
 # ---------------------------------------------------------------------------
 
+# ... (código anterior sin cambios hasta analyzeAstResp) ...
+
 class analyzeAstResp(BaseModel):
     """
-    Respuesta del análisis de complejidad (ACTUALIZADA).
+    Respuesta del análisis de complejidad.
+    
+    🆕 NUEVO: Campo recurrence_equation para mostrar en UI.
+    🆕 NUEVO: Campo execution_trace para seguimiento iterativo.
     """
     algorithm_kind: str
     big_o: str
     big_omega: str
     theta: Optional[str] = None
 
-    # ✅ Cotas fuertes con fórmula explícita
     strong_bounds: Optional[StrongBounds] = Field(
         default=None,
         description="Fórmula explícita: T(n) = 5n² + 3n + 7"
@@ -151,16 +206,26 @@ class analyzeAstResp(BaseModel):
     lines: Optional[List[LineCost]] = None
     notes: Optional[str] = None
 
-    # 👉 Método usado por el analizador
     method_used: Optional[str] = Field(
         default=None,
-        description="Método principal utilizado en el análisis (p.ej. 'master_theorem', 'recursion_tree + iteration')."
+        description="Método principal utilizado en el análisis."
     )
 
-    # 👉 NUEVO: Sumatorias (texto plano, por caso)
-    summations: Optional[Dict[str, str]] = Field(
+    summations: Optional[Dict[str, Dict[str, str]]] = Field(
         default=None,
-        description="Sumatorias y derivación por caso: worst/best/avg."
+        description="Sumatorias y derivación por caso: worst/best/avg. Cada caso contiene {latex, text}."
+    )
+
+    # 🆕 NUEVO CAMPO (recursivo)
+    recurrence_equation: Optional[str] = Field(
+        default=None,
+        description="Ecuación de recurrencia COMPLETA (solo para algoritmos recursivos).\nEjemplo: 'T(n) = 2·T(n/2) + c·n,  n > 1\\nT(1) = d'"
+    )
+    
+    # 🆕 NUEVO CAMPO (iterativo)
+    execution_trace: Optional[ExecutionTrace] = Field(
+        default=None,
+        description="Traza de ejecución paso a paso (solo para algoritmos iterativos).\nMuestra el seguimiento del pseudocódigo con estados de variables."
     )
 
 

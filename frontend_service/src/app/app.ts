@@ -5,6 +5,7 @@ import { HttpClientModule } from '@angular/common/http';
 import { OrchestratorService, AnalyzeResponse } from './services/orchestrator.service';
 import { GeminiService, ToGrammarResponse, ComparisonResponse } from './services/gemini.service';
 import { ComplexityVisualizerComponent } from './components/complexity-visualizer.component';
+import { TextareaWithLinesComponent } from './components/textarea-with-lines.component';
 
 interface AlgorithmExample {
   name: string;
@@ -20,7 +21,8 @@ interface AlgorithmExample {
     CommonModule, 
     FormsModule, 
     HttpClientModule, 
-    ComplexityVisualizerComponent
+    ComplexityVisualizerComponent,
+    TextareaWithLinesComponent
   ],
   templateUrl: './app.html',
   styleUrls: ['./app.css']
@@ -361,8 +363,15 @@ end`
 
     this.orchestratorService.analyze(this.inputCode, this.selectedObjective).subscribe({
       next: (response: AnalyzeResponse) => {
+        console.log('✅ [onAnalyze] RESPUESTA COMPLETA DEL BACKEND:');
+        console.log('   algorithm_kind:', response.algorithm_kind);
+        console.log('   recurrence_equation:', response.recurrence_equation);
+        console.log('   big_o:', response.big_o);
+        console.log('   method_used:', response.method_used);
+        console.log('   normalized_code:', response.normalized_code?.substring(0, 100) + '...');
+        console.log('   COMPLETO:', JSON.stringify(response, null, 2));
+        
         this.result = response;
-        console.log('✅ Análisis completado:', response);
         this.isLoading = false;
         this.cdr.detectChanges();
       },
